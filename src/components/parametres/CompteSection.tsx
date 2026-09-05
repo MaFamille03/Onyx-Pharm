@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
-import { SecondPasswordModal } from "@/components/securite/SecondPasswordModal";
+import { PinModal } from "@/components/securite/PinModal";
 
 const PHRASE_CONFIRMATION = "SUPPRIMER DEFINITIVEMENT MON COMPTE";
 
@@ -66,12 +66,12 @@ export function CompteSection() {
     setSaving(false);
   }
 
-  async function confirmerDesactivation(motDePasse: string) {
-    const ok = await supabase.rpc("verifier_second_mot_de_passe", {
-      p_mdp: motDePasse,
+  async function confirmerDesactivation(pin: string) {
+    const ok = await supabase.rpc("verifier_pin_securite", {
+      p_pin: pin,
     });
     if (ok.error || !ok.data) {
-      throw new Error("Mot de passe de sécurité incorrect.");
+      throw new Error("Code PIN incorrect.");
     }
 
     const {
@@ -93,12 +93,12 @@ export function CompteSection() {
     router.push("/connexion");
   }
 
-  async function confirmerSuppression(motDePasse: string) {
-    const ok = await supabase.rpc("verifier_second_mot_de_passe", {
-      p_mdp: motDePasse,
+  async function confirmerSuppression(pin: string) {
+    const ok = await supabase.rpc("verifier_pin_securite", {
+      p_pin: pin,
     });
     if (ok.error || !ok.data) {
-      throw new Error("Mot de passe de sécurité incorrect.");
+      throw new Error("Code PIN incorrect.");
     }
 
     const {
@@ -215,7 +215,7 @@ export function CompteSection() {
       </div>
 
       {modalDesactivation && (
-        <SecondPasswordModal
+        <PinModal
           title="Désactiver mon compte"
           message="Vous serez déconnecté et ne pourrez plus vous reconnecter avec ce compte. L'historique de vos opérations reste visible pour les autres utilisateurs."
           onCancel={() => setModalDesactivation(false)}
@@ -276,9 +276,9 @@ export function CompteSection() {
       )}
 
       {modalSuppressionFinal && (
-        <SecondPasswordModal
+        <PinModal
           title="Confirmation finale"
-          message="Dernière étape : saisissez le second mot de passe pour supprimer définitivement votre compte."
+          message="Dernière étape : saisissez votre code PIN pour supprimer définitivement votre compte."
           onCancel={() => setModalSuppressionFinal(false)}
           onConfirm={confirmerSuppression}
         />

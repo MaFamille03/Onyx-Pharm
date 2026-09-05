@@ -11,6 +11,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { getStockInitialId } from "@/lib/conteneurs";
+import { normaliser, trouverOuCreer } from "@/lib/normaliser";
 import {
   exporterExcel,
   exporterExcelMisEnForme,
@@ -87,20 +88,16 @@ export function ImportExportManager() {
     return brutes.map((row, i) => {
       const erreurs: string[] = [];
       const designation = String(row["Désignation"] ?? "").trim();
-      const categorie = String(row["Catégorie"] ?? "").trim();
-      const sousCategorie = String(row["Sous-catégorie"] ?? "").trim();
-      const fournisseur = String(row["Fournisseur"] ?? "").trim();
-      const emplacement = String(row["Emplacement"] ?? "").trim();
       const quantite = row["Quantité en stock"];
       const stockMin = row["Stock minimum"];
       const prixVente = row["Prix de vente conseillé"];
       const dateExpiration = String(row["Date d'expiration"] ?? "").trim();
 
       if (!designation) erreurs.push("Désignation vide");
-      if (designation && designationsVues.has(designation.toLowerCase())) {
+      if (designation && designationsVues.has(normaliser(designation))) {
         erreurs.push("Doublon dans le fichier");
       }
-      if (designation) designationsVues.add(designation.toLowerCase());
+      if (designation) designationsVues.add(normaliser(designation));
 
       if (quantite !== "" && quantite !== undefined && Number.isNaN(Number(quantite))) {
         erreurs.push("Quantité invalide");
@@ -112,27 +109,10 @@ export function ImportExportManager() {
         erreurs.push("Prix de vente invalide");
       }
 
-      if (categorie && !categories.some((c) => c.nom.toLowerCase() === categorie.toLowerCase())) {
-        erreurs.push(`Catégorie inexistante : "${categorie}"`);
-      }
-      if (
-        sousCategorie &&
-        !sousCategories.some((sc) => sc.nom.toLowerCase() === sousCategorie.toLowerCase())
-      ) {
-        erreurs.push(`Sous-catégorie inexistante : "${sousCategorie}"`);
-      }
-      if (
-        fournisseur &&
-        !fournisseurs.some((f) => f.nom.toLowerCase() === fournisseur.toLowerCase())
-      ) {
-        erreurs.push(`Fournisseur inexistant : "${fournisseur}"`);
-      }
-      if (
-        emplacement &&
-        !emplacements.some((e) => e.nom.toLowerCase() === emplacement.toLowerCase())
-      ) {
-        erreurs.push(`Emplacement inexistant : "${emplacement}"`);
-      }
+      // Catégorie, sous-catégorie, fournisseur et emplacement ne sont
+      // plus des erreurs bloquantes : s'ils n'existent pas déjà (une
+      // fois la casse et les accents ignorés), ils seront créés
+      // automatiquement à l'import.
       if (dateExpiration && Number.isNaN(Date.parse(dateExpiration))) {
         erreurs.push("Date d'expiration incorrecte");
       }
@@ -179,41 +159,89 @@ export function ImportExportManager() {
     } = await supabase.auth.getUser();
     const stockInitialId = await getStockInitialId(supabase);
 
+    // Copies de travail : ce qui est créé pendant cet import s'y ajoute
+    // au fur et à mesure, pour que les lignes suivantes du même fichier
+    // le retrouvent sans le recréer en double.
+    const categoriesTravail = [...categories];
+    const sousCategoriesTravail = [...sousCategories];
+    const fournisseursTravail = [...fournisseurs];
+    const emplacementsTravail = [...emplacements];
+
     let reussies = 0;
     let echouees = 0;
 
     for (const ligne of valides) {
       const row = ligne.data;
-      const categorieId = categories.find(
-        (c) => c.nom.toLowerCase() === String(row["Catégorie"] ?? "").trim().toLowerCase()
-      )?.id;
-      const sousCategorieId = sousCategories.find(
-        (sc) =>
-          sc.nom.toLowerCase() ===
-          String(row["Sous-catégorie"] ?? "").trim().toLowerCase()
-      )?.id;
-      const fournisseurId = fournisseurs.find(
-        (f) => f.nom.toLowerCase() === String(row["Fournisseur"] ?? "").trim().toLowerCase()
-      )?.id;
-      const emplacementId = emplacements.find(
-        (e) => e.nom.toLowerCase() === String(row["Emplacement"] ?? "").trim().toLowerCase()
-      )?.id;
+
+      const categorieId = await trouverOuCreer(
+        String(row["Catégorie"] ?? ""),
+        categoriesTravail,
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("categories")
+            .insert({ nom: nomSaisi })
+            .select("id, nom")
+            .single();
+          return data;
+        }
+      );
+
+      const sousCategorieId = categorieId
+        ? await trouverOuCreer(
+            String(row["Sous-catégorie"] ?? ""),
+            sousCategoriesTravail.filter((sc) => sc.categorie_id === categorieId),
+            async (nomSaisi) => {
+              const { data } = await supabase
+                .from("sous_categories")
+                .insert({ nom: nomSaisi, categorie_id: categorieId })
+                .select("id, nom, categorie_id")
+                .single();
+              return data;
+            }
+          )
+        : null;
+
+      const fournisseurId = await trouverOuCreer(
+        String(row["Fournisseur"] ?? ""),
+        fournisseursTravail,
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("fournisseurs")
+            .insert({ nom: nomSaisi })
+            .select("id, nom")
+            .single();
+          return data;
+        }
+      );
+
+      const emplacementId = await trouverOuCreer(
+        String(row["Emplacement"] ?? ""),
+        emplacementsTravail,
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("emplacements")
+            .insert({ nom: nomSaisi })
+            .select("id, nom")
+            .single();
+          return data;
+        }
+      );
 
       const statutValeur = String(row["Statut"] ?? "Actif").trim();
       const statutFinal = statutsArticle.some(
-        (s) => s.valeur.toLowerCase() === statutValeur.toLowerCase()
+        (s) => normaliser(s.valeur) === normaliser(statutValeur)
       )
-        ? statutValeur
+        ? statutsArticle.find((s) => normaliser(s.valeur) === normaliser(statutValeur))!.valeur
         : "Actif";
 
       const { data: article, error } = await supabase
         .from("articles")
         .insert({
           designation: String(row["Désignation"]).trim(),
-          categorie_id: categorieId ?? null,
-          sous_categorie_id: sousCategorieId ?? null,
+          categorie_id: categorieId,
+          sous_categorie_id: sousCategorieId,
           marque: String(row["Marque"] ?? "").trim() || null,
-          fournisseur_id: fournisseurId ?? null,
+          fournisseur_id: fournisseurId,
           stock_minimum: Number(row["Stock minimum"]) || 0,
           prix_vente_conseille: Number(row["Prix de vente conseillé"]) || 0,
           numero_lot: String(row["Numéro de lot"] ?? "").trim() || null,

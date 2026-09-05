@@ -5,6 +5,7 @@ import { Package2, Plus, ArrowLeft, Pencil, Trash2, Upload, FileSpreadsheet, Che
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { lireFichierExcel, exporterExcelMisEnForme } from "@/lib/excel";
+import { normaliser, trouverOuCreer } from "@/lib/normaliser";
 import { Modal } from "@/components/ui/Modal";
 import { SelectField } from "@/components/ui/FormControls";
 import { StatutBadge, InlineBanner } from "@/components/ui/Badges";
@@ -276,45 +277,27 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
     return brutes.map((row, i) => {
       const erreurs: string[] = [];
       const designation = String(row["Désignation"] ?? "").trim();
-      const categorie = String(row["Catégorie"] ?? "").trim();
-      const sousCategorie = String(row["Sous-catégorie"] ?? "").trim();
-      const fournisseur = String(row["Fournisseur"] ?? "").trim();
       const emplacement = String(row["Emplacement"] ?? "").trim();
       const quantite = row["Quantité"];
       const dateExpiration = String(row["Date d'expiration"] ?? "").trim();
 
+      // Catégorie, sous-catégorie, fournisseur et emplacement ne sont
+      // plus jamais des erreurs bloquantes : s'ils n'existent pas déjà
+      // (une fois la casse et les accents ignorés), ils sont créés
+      // automatiquement au moment de l'enregistrement. Seuls la
+      // désignation, la quantité et le format de la date restent
+      // vérifiés ici.
       if (!designation) erreurs.push("Désignation vide");
       if (!emplacement) erreurs.push("Emplacement obligatoire");
-      if (
-        emplacement &&
-        !emplacements.some((e) => e.nom.toLowerCase() === emplacement.toLowerCase())
-      ) {
-        erreurs.push(`Emplacement inexistant : "${emplacement}"`);
-      }
       if (!quantite || Number.isNaN(Number(quantite)) || Number(quantite) <= 0) {
         erreurs.push("Quantité invalide");
-      }
-      if (categorie && !categories.some((c) => c.nom.toLowerCase() === categorie.toLowerCase())) {
-        erreurs.push(`Catégorie inexistante : "${categorie}"`);
-      }
-      if (
-        sousCategorie &&
-        !sousCategories.some((sc) => sc.nom.toLowerCase() === sousCategorie.toLowerCase())
-      ) {
-        erreurs.push(`Sous-catégorie inexistante : "${sousCategorie}"`);
-      }
-      if (
-        fournisseur &&
-        !fournisseurs.some((f) => f.nom.toLowerCase() === fournisseur.toLowerCase())
-      ) {
-        erreurs.push(`Fournisseur inexistant : "${fournisseur}"`);
       }
       if (dateExpiration && Number.isNaN(Date.parse(dateExpiration))) {
         erreurs.push("Date d'expiration incorrecte");
       }
 
       const articleExistant = articlesOptions.find(
-        (a) => a.designation.toLowerCase() === designation.toLowerCase()
+        (a) => normaliser(a.designation) === normaliser(designation)
       );
 
       return {
@@ -376,32 +359,74 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
     const articlesACreer = lignesImporteesValides.filter((l) => !l.articleExistantId);
     const idsCrees = new Map<number, string>();
 
+    // Copies de travail : les catégories/sous-catégories/fournisseurs/
+    // emplacements créés pendant cet import s'y ajoutent au fur et à
+    // mesure, pour que les lignes suivantes du même fichier les
+    // retrouvent sans les recréer en double.
+    const categoriesTravail = [...categories];
+    const sousCategoriesTravail = [...sousCategories];
+    const fournisseursTravail = [...fournisseurs];
+    const emplacementsTravail = [...emplacements];
+
     for (const ligne of articlesACreer) {
       const row = ligne.data;
-      const categorieId = categories.find(
-        (c) => c.nom.toLowerCase() === String(row["Catégorie"] ?? "").trim().toLowerCase()
-      )?.id;
-      const sousCategorieId = sousCategories.find(
-        (sc) => sc.nom.toLowerCase() === String(row["Sous-catégorie"] ?? "").trim().toLowerCase()
-      )?.id;
-      const fournisseurArticleId = fournisseurs.find(
-        (f) => f.nom.toLowerCase() === String(row["Fournisseur"] ?? "").trim().toLowerCase()
-      )?.id;
+
+      const categorieId = await trouverOuCreer(
+        String(row["Catégorie"] ?? ""),
+        categoriesTravail,
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("categories")
+            .insert({ nom: nomSaisi })
+            .select("id, nom")
+            .single();
+          return data;
+        }
+      );
+
+      const sousCategorieId = categorieId
+        ? await trouverOuCreer(
+            String(row["Sous-catégorie"] ?? ""),
+            sousCategoriesTravail.filter((sc) => sc.categorie_id === categorieId),
+            async (nomSaisi) => {
+              const { data } = await supabase
+                .from("sous_categories")
+                .insert({ nom: nomSaisi, categorie_id: categorieId })
+                .select("id, nom, categorie_id")
+                .single();
+              return data;
+            }
+          )
+        : null;
+
+      const fournisseurArticleId = await trouverOuCreer(
+        String(row["Fournisseur"] ?? ""),
+        fournisseursTravail,
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("fournisseurs")
+            .insert({ nom: nomSaisi })
+            .select("id, nom")
+            .single();
+          return data;
+        }
+      );
+
       const statutValeur = String(row["Statut"] ?? "Actif").trim();
       const statutFinal = statutsArticle.some(
-        (s) => s.valeur.toLowerCase() === statutValeur.toLowerCase()
+        (s) => normaliser(s.valeur) === normaliser(statutValeur)
       )
-        ? statutValeur
+        ? statutsArticle.find((s) => normaliser(s.valeur) === normaliser(statutValeur))!.valeur
         : "Actif";
 
       const { data: article, error: articleError } = await supabase
         .from("articles")
         .insert({
           designation: String(row["Désignation"]).trim(),
-          categorie_id: categorieId ?? null,
-          sous_categorie_id: sousCategorieId ?? null,
+          categorie_id: categorieId,
+          sous_categorie_id: sousCategorieId,
           marque: String(row["Marque"] ?? "").trim() || null,
-          fournisseur_id: fournisseurArticleId ?? null,
+          fournisseur_id: fournisseurArticleId,
           stock_minimum: Number(row["Stock minimum"]) || 0,
           prix_vente_conseille: Number(row["Prix de vente conseillé"]) || 0,
           numero_lot: String(row["Numéro de lot"] ?? "").trim() || null,
@@ -442,14 +467,22 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
     for (const ligne of lignesImporteesValides) {
       const articleId = ligne.articleExistantId ?? idsCrees.get(ligne.index);
       if (!articleId) continue;
-      const emplacementNom = String(ligne.data["Emplacement"] ?? "").trim();
-      const emplacement = emplacements.find(
-        (e) => e.nom.toLowerCase() === emplacementNom.toLowerCase()
+      const emplacementId = await trouverOuCreer(
+        String(ligne.data["Emplacement"] ?? ""),
+        emplacementsTravail,
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("emplacements")
+            .insert({ nom: nomSaisi })
+            .select("id, nom")
+            .single();
+          return data;
+        }
       );
-      if (!emplacement) continue;
+      if (!emplacementId) continue;
       lignesFinal.push({
         article_id: articleId,
-        emplacement_id: emplacement.id,
+        emplacement_id: emplacementId,
         quantite: Number(ligne.data["Quantité"]),
       });
     }

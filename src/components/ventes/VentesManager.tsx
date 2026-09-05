@@ -12,7 +12,6 @@ import { ClientSelect } from "@/components/tiers/ClientSelect";
 import { ConteneurLigneSelect } from "@/components/conteneurs/ConteneurLigneSelect";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
-import { SecondPasswordModal } from "@/components/securite/SecondPasswordModal";
 import { PinModal } from "@/components/securite/PinModal";
 import { DocumentImprimable } from "@/components/documents/DocumentImprimable";
 
@@ -818,21 +817,21 @@ function VenteDetail({
     onBack();
   }
 
-  async function annulerVenteAvecMotDePasse(motDePasse: string) {
+  async function annulerVenteAvecPin(pin: string) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     const { error } = await supabase.rpc("annuler_vente", {
       p_vente_id: venteId,
-      p_second_mdp: motDePasse,
+      p_pin: pin,
       p_utilisateur_id: user?.id ?? null,
     });
 
     if (error) {
       throw new Error(
-        error.message.includes("Mot de passe")
-          ? "Mot de passe de sécurité incorrect."
+        error.message.includes("incorrect")
+          ? "Code PIN incorrect."
           : "Impossible d'annuler cette vente."
       );
     }
@@ -1130,11 +1129,11 @@ function VenteDetail({
       )}
 
       {annulationModalOpen && (
-        <SecondPasswordModal
+        <PinModal
           title="Annuler la vente"
           message={`Cette action restituera au stock les quantités vendues pour ${vente.reference} et ne peut pas être défaite. Les paiements déjà reçus (${vente.montant_paye.toLocaleString("fr-FR")} FCFA) ne seront pas remboursés automatiquement.`}
           onCancel={() => setAnnulationModalOpen(false)}
-          onConfirm={annulerVenteAvecMotDePasse}
+          onConfirm={annulerVenteAvecPin}
         />
       )}
 
