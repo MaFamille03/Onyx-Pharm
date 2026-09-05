@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { ArrowLeftRight, AlertTriangle, Package2 } from "lucide-react";
 import { ArticlesManager } from "@/components/articles/ArticlesManager";
-import { StocksManager } from "@/components/stock/StocksManager";
 import { InventairesManager } from "@/components/inventaires/InventairesManager";
 import { MouvementModal } from "@/components/stock/MouvementModal";
 import { AlerteModal } from "@/components/stock/AlerteModal";
@@ -11,8 +10,7 @@ import { NouveauConteneur } from "@/components/conteneurs/ConteneursManager";
 import { SecondaryButton } from "@/components/ui/Buttons";
 
 const ONGLETS = [
-  { id: "articles", label: "Articles" },
-  { id: "stock", label: "Stock" },
+  { id: "articles", label: "Articles & Stock" },
   { id: "inventaire", label: "Inventaire" },
 ] as const;
 
@@ -64,7 +62,6 @@ export function StockUnifieManager() {
 
       <div className="mt-5">
         {onglet === "articles" && <ArticlesManager embarque />}
-        {onglet === "stock" && <StocksManager embarque />}
         {onglet === "inventaire" && <InventairesManager embarque />}
       </div>
 

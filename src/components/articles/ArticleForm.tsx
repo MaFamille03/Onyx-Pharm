@@ -295,6 +295,12 @@ export function ArticleFormModal({
                 </option>
               ))}
           </SelectField>
+          <p className="-mt-2.5 text-xs text-onyx-400">
+            Le statut indique si l&apos;article reste proposé dans les
+            ventes et achats — ce n&apos;est pas une indication de son état
+            physique. Un article solide, toujours vendu, doit rester
+            &quot;Actif&quot; même après des années.
+          </p>
 
           <FormField
             id="prix-vente"

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Plus, Search, Pencil, Trash2, AlertTriangle, Clock } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, AlertTriangle, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
+import { getStockInitialId } from "@/lib/conteneurs";
 import {
   ArticleFormModal,
   EMPTY_ARTICLE_FORM,
@@ -11,8 +12,9 @@ import {
 } from "@/components/articles/ArticleForm";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
-import { StatutBadge } from "@/components/ui/Badges";
-import { PrimaryButton } from "@/components/ui/Buttons";
+import { StatutBadge, InlineBanner } from "@/components/ui/Badges";
+import { Modal } from "@/components/ui/Modal";
+import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { PinModal } from "@/components/securite/PinModal";
 
 type ArticleRow = {
@@ -30,7 +32,12 @@ type ArticleRow = {
   observations: string | null;
   categories: { nom: string } | null;
   fournisseurs: { nom: string } | null;
-  stocks: { quantite: number }[];
+  stocks: {
+    quantite: number;
+    emplacement_id: string;
+    emplacements: { nom: string } | null;
+    conteneurs: { code: string } | null;
+  }[];
 };
 
 const DELAI_ALERTE_JOURS_DEFAUT = 30;
@@ -60,6 +67,17 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
   const [editingValues, setEditingValues] =
     useState<ArticleFormValues>(EMPTY_ARTICLE_FORM);
   const [pinModalArticle, setPinModalArticle] = useState<ArticleRow | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [ajustement, setAjustement] = useState<{
+    articleId: string;
+    designation: string;
+    emplacementId: string;
+    emplacementNom: string;
+    quantiteActuelle: number;
+  } | null>(null);
+  const [nouvelleQuantite, setNouvelleQuantite] = useState("");
+  const [ajustementSaving, setAjustementSaving] = useState(false);
+  const [ajustementError, setAjustementError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,7 +85,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       supabase
         .from("articles")
         .select(
-          "id, designation, marque, prix_vente_conseille, stock_minimum, numero_lot, date_expiration, statut, categorie_id, sous_categorie_id, fournisseur_id, observations, categories(nom), fournisseurs(nom), stocks(quantite)"
+          "id, designation, marque, prix_vente_conseille, stock_minimum, numero_lot, date_expiration, statut, categorie_id, sous_categorie_id, fournisseur_id, observations, categories(nom), fournisseurs(nom), stocks(quantite, emplacement_id, emplacements(nom), conteneurs(code))"
         )
         .order("designation"),
       supabase
@@ -116,26 +134,130 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
 
   async function confirmerSuppression(pin: string) {
     if (!pinModalArticle) return;
-    const ok = await supabase.rpc("verifier_pin_securite", { p_pin: pin });
-    if (ok.error || !ok.data) {
-      throw new Error("Code PIN incorrect.");
-    }
-    const { error } = await supabase
-      .from("articles")
-      .delete()
-      .eq("id", pinModalArticle.id);
+    const { error } = await supabase.rpc("supprimer_article", {
+      p_article_id: pinModalArticle.id,
+      p_pin: pin,
+    });
     if (error) {
-      const message =
-        error.code === "23503"
-          ? "Cet article est utilisé ailleurs (ventes, mouvements de stock...) et ne peut pas être supprimé."
-          : logSupabaseError(
-              { table: "articles", operation: "delete" },
-              error,
-              "Impossible de supprimer cet article. Réessayez."
-            );
-      throw new Error(message);
+      throw new Error(
+        logSupabaseError(
+          { table: "articles", operation: "rpc supprimer_article" },
+          error,
+          "Impossible de supprimer cet article. Réessayez."
+        )
+      );
     }
     setPinModalArticle(null);
+    load();
+  }
+
+  function openAjustement(
+    articleId: string,
+    designation: string,
+    emplacementId: string,
+    emplacementNom: string,
+    quantiteActuelle: number
+  ) {
+    setAjustement({ articleId, designation, emplacementId, emplacementNom, quantiteActuelle });
+    setNouvelleQuantite(String(quantiteActuelle));
+    setAjustementError(null);
+  }
+
+  async function handleAjustement(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ajustement) return;
+
+    const nouvelle = Number(nouvelleQuantite);
+    if (Number.isNaN(nouvelle) || nouvelle < 0) {
+      setAjustementError("Quantité invalide.");
+      return;
+    }
+    const delta = nouvelle - ajustement.quantiteActuelle;
+    if (delta === 0) {
+      setAjustement(null);
+      return;
+    }
+
+    setAjustementSaving(true);
+    setAjustementError(null);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (delta < 0) {
+      const { data: repartition, error: fifoError } = await supabase.rpc(
+        "consommer_stock_fifo",
+        {
+          p_article_id: ajustement.articleId,
+          p_emplacement_id: ajustement.emplacementId,
+          p_quantite: -delta,
+          p_conteneur_id: null,
+        }
+      );
+      if (fifoError) {
+        setAjustementError(
+          logSupabaseError(
+            { table: "stocks", operation: "rpc consommer_stock_fifo" },
+            fifoError,
+            "Impossible de corriger le stock. Réessayez."
+          )
+        );
+        setAjustementSaving(false);
+        return;
+      }
+      for (const part of repartition ?? []) {
+        await supabase.from("mouvements_stock").insert({
+          article_id: ajustement.articleId,
+          emplacement_id: ajustement.emplacementId,
+          type: "autre_sortie",
+          quantite: -part.quantite,
+          document_type: "ajustement_manuel",
+          observation: "Correction manuelle de stock",
+          created_by: user?.id ?? null,
+        });
+      }
+    } else {
+      const stockInitialId = await getStockInitialId(supabase);
+      if (!stockInitialId) {
+        setAjustementError(
+          "Conteneur « Stock Initial » introuvable. Exécutez la migration 0015 dans Supabase."
+        );
+        setAjustementSaving(false);
+        return;
+      }
+      const { error: upsertError } = await supabase.from("stocks").upsert(
+        {
+          article_id: ajustement.articleId,
+          emplacement_id: ajustement.emplacementId,
+          conteneur_id: stockInitialId,
+          quantite: delta,
+        },
+        { onConflict: "article_id,emplacement_id,conteneur_id" }
+      );
+      if (upsertError) {
+        setAjustementError(
+          logSupabaseError(
+            { table: "stocks", operation: "upsert" },
+            upsertError,
+            "Impossible de mettre à jour le stock. Réessayez."
+          )
+        );
+        setAjustementSaving(false);
+        return;
+      }
+      await supabase.from("mouvements_stock").insert({
+        article_id: ajustement.articleId,
+        emplacement_id: ajustement.emplacementId,
+        type: "autre_entree",
+        quantite: delta,
+        document_type: "ajustement_manuel",
+        observation: "Correction manuelle de stock",
+        created_by: user?.id ?? null,
+      });
+    }
+
+    setAjustementSaving(false);
+    setAjustement(null);
     load();
   }
 
@@ -310,6 +432,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-onyx-100 bg-onyx-50/50 text-left text-xs font-medium uppercase tracking-wide text-onyx-400">
+                    <th className="px-4 py-3" />
                     <th className="px-4 py-3">Désignation</th>
                     <th className="px-4 py-3">Catégorie</th>
                     <th className="px-4 py-3">Fournisseur</th>
@@ -320,65 +443,159 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtres.map((a) => (
-                    <tr
-                      key={a.id}
-                      className="border-b border-onyx-50 last:border-0 hover:bg-onyx-50/40"
-                    >
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-onyx-800">
-                          {a.designation}
-                        </p>
-                        {a.marque && (
-                          <p className="text-xs text-onyx-400">{a.marque}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-onyx-500">
-                        {a.categories?.nom || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-onyx-500">
-                        {a.fournisseurs?.nom || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-onyx-600">
-                        {a.prix_vente_conseille.toLocaleString("fr-FR")}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-                            a.stockFaible
-                              ? "bg-red-50 text-red-600"
-                              : "bg-onyx-50 text-onyx-600"
-                          }`}
+                  {filtres.map((a) => {
+                    const estOuvert = expandedId === a.id;
+                    const parEmplacement = new Map<
+                      string,
+                      { nom: string; total: number; conteneurs: { code: string; quantite: number }[] }
+                    >();
+                    for (const s of a.stocks) {
+                      const cle = s.emplacement_id;
+                      const entree = parEmplacement.get(cle) ?? {
+                        nom: s.emplacements?.nom ?? "—",
+                        total: 0,
+                        conteneurs: [],
+                      };
+                      entree.total += s.quantite;
+                      if (s.quantite > 0 && s.conteneurs) {
+                        entree.conteneurs.push({ code: s.conteneurs.code, quantite: s.quantite });
+                      }
+                      parEmplacement.set(cle, entree);
+                    }
+
+                    return (
+                      <>
+                        <tr
+                          key={a.id}
+                          className="border-b border-onyx-50 last:border-0 hover:bg-onyx-50/40"
                         >
-                          {a.stockFaible && <AlertTriangle size={11} />}
-                          {a.stockTotal}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatutBadge statut={a.statut} />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => openEdit(a)}
-                            className="rounded-md p-1.5 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
-                            aria-label="Modifier"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setPinModalArticle(a);
-                            }}
-                            className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
-                            aria-label="Supprimer"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="py-3 pl-3">
+                            <button
+                              onClick={() => setExpandedId(estOuvert ? null : a.id)}
+                              className="rounded p-0.5 text-onyx-400 hover:bg-onyx-100"
+                              aria-label="Détail du stock"
+                            >
+                              {estOuvert ? (
+                                <ChevronDown size={16} />
+                              ) : (
+                                <ChevronRight size={16} />
+                              )}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-onyx-800">
+                              {a.designation}
+                            </p>
+                            {a.marque && (
+                              <p className="text-xs text-onyx-400">{a.marque}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-onyx-500">
+                            {a.categories?.nom || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-onyx-500">
+                            {a.fournisseurs?.nom || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right text-onyx-600">
+                            {a.prix_vente_conseille.toLocaleString("fr-FR")}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                                a.stockFaible
+                                  ? "bg-red-50 text-red-600"
+                                  : "bg-onyx-50 text-onyx-600"
+                              }`}
+                            >
+                              {a.stockFaible && <AlertTriangle size={11} />}
+                              {a.stockTotal}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatutBadge statut={a.statut} />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => openEdit(a)}
+                                className="rounded-md p-1.5 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
+                                aria-label="Modifier"
+                              >
+                                <Pencil size={16} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setPinModalArticle(a);
+                                }}
+                                className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                                aria-label="Supprimer"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {estOuvert && (
+                          <tr className="border-b border-onyx-50 bg-onyx-50/30">
+                            <td colSpan={8} className="px-4 py-3">
+                              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-onyx-400">
+                                Stock par emplacement
+                              </p>
+                              {parEmplacement.size === 0 ? (
+                                <p className="text-sm text-onyx-400">
+                                  Aucun stock enregistré pour cet article.
+                                </p>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {Array.from(parEmplacement.entries()).map(([emplId, info]) => (
+                                    <div
+                                      key={emplId}
+                                      className="flex items-center justify-between rounded-lg bg-white px-3 py-2"
+                                    >
+                                      <div>
+                                        <span className="text-sm font-medium text-onyx-700">
+                                          {info.nom}
+                                        </span>
+                                        {info.conteneurs.length > 0 && (
+                                          <span className="ml-2 text-xs text-onyx-400">
+                                            (
+                                            {info.conteneurs
+                                              .map((c) => `${c.code} : ${c.quantite}`)
+                                              .join(" · ")}
+                                            )
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm text-onyx-600">
+                                          {info.total}
+                                        </span>
+                                        <button
+                                          onClick={() =>
+                                            openAjustement(
+                                              a.id,
+                                              a.designation,
+                                              emplId,
+                                              info.nom,
+                                              info.total
+                                            )
+                                          }
+                                          className="rounded-md p-1 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
+                                          aria-label="Corriger la quantité"
+                                        >
+                                          <Pencil size={13} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -404,6 +621,47 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
           onCancel={() => setPinModalArticle(null)}
           onConfirm={confirmerSuppression}
         />
+      )}
+
+      {ajustement && (
+        <Modal
+          title={`Ajuster le stock — ${ajustement.emplacementNom}`}
+          onClose={() => setAjustement(null)}
+        >
+          <form onSubmit={handleAjustement} className="space-y-4">
+            {ajustementError && <InlineBanner message={ajustementError} />}
+            <p className="text-sm text-onyx-500">{ajustement.designation}</p>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Nouvelle quantité
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                required
+                value={nouvelleQuantite}
+                onChange={(e) => setNouvelleQuantite(e.target.value)}
+                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+              />
+              <p className="mt-1 text-xs text-onyx-400">
+                Quantité actuelle : {ajustement.quantiteActuelle}
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <SecondaryButton
+                type="button"
+                onClick={() => setAjustement(null)}
+                className="flex-1"
+              >
+                Annuler
+              </SecondaryButton>
+              <PrimaryButton type="submit" loading={ajustementSaving} className="flex-1">
+                Enregistrer
+              </PrimaryButton>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );

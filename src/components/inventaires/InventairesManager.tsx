@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, ArrowLeft, CheckCircle2, Trash2, Printer } from "lucide-react";
+import { Plus, ArrowLeft, CheckCircle2, Trash2, Printer, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { Modal } from "@/components/ui/Modal";
@@ -307,6 +307,12 @@ function InventaireDetail({
   const [modifs, setModifs] = useState<Record<string, string>>({});
   const [suppressionOpen, setSuppressionOpen] = useState(false);
   const [impressionOpen, setImpressionOpen] = useState(false);
+  const [correctionLigne, setCorrectionLigne] = useState<{
+    id: string;
+    quantite_reelle: number;
+    articles: { designation: string } | null;
+  } | null>(null);
+  const [correctionValeur, setCorrectionValeur] = useState("");
 
   const estBrouillon = inventaire.statut === "Brouillon";
 
@@ -391,6 +397,30 @@ function InventaireDetail({
     }
     setSuppressionOpen(false);
     onBack();
+  }
+
+  async function confirmerCorrectionLigne(pin: string) {
+    if (!correctionLigne) return;
+    const val = Number(correctionValeur);
+    if (Number.isNaN(val) || val < 0) {
+      throw new Error("Quantité invalide.");
+    }
+    const { error } = await supabase.rpc("corriger_ligne_inventaire_validee", {
+      p_ligne_id: correctionLigne.id,
+      p_nouvelle_quantite_reelle: val,
+      p_pin: pin,
+    });
+    if (error) {
+      throw new Error(
+        logSupabaseError(
+          { table: "inventaire_lignes", operation: "rpc corriger_ligne_inventaire_validee" },
+          error,
+          "Impossible de corriger cette ligne."
+        )
+      );
+    }
+    setCorrectionLigne(null);
+    load();
   }
 
   const totalEcarts = lignes.filter((l) => {
@@ -514,7 +544,19 @@ function InventaireDetail({
                             className="w-20 rounded-md border border-onyx-200 px-2 py-1 text-right text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
                           />
                         ) : (
-                          l.quantite_reelle
+                          <span className="inline-flex items-center gap-1.5">
+                            {l.quantite_reelle}
+                            <button
+                              onClick={() => {
+                                setCorrectionLigne(l);
+                                setCorrectionValeur(String(l.quantite_reelle));
+                              }}
+                              className="rounded p-0.5 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
+                              aria-label="Corriger cette quantité comptée"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-right">
@@ -569,6 +611,24 @@ function InventaireDetail({
           onCancel={() => setSuppressionOpen(false)}
           onConfirm={confirmerSuppression}
         />
+      )}
+
+      {correctionLigne && (
+        <PinModal
+          title="Corriger cette quantité comptée"
+          message={`Nouvelle quantité comptée pour "${correctionLigne.articles?.designation}" (actuellement ${correctionLigne.quantite_reelle}). Cet inventaire est déjà validé : le stock sera ajusté automatiquement selon la différence.`}
+          onCancel={() => setCorrectionLigne(null)}
+          onConfirm={confirmerCorrectionLigne}
+        >
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={correctionValeur}
+            onChange={(e) => setCorrectionValeur(e.target.value)}
+            className="mt-3 w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </PinModal>
       )}
 
       {impressionOpen && (
