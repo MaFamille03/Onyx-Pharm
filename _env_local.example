@@ -1,0 +1,5 @@
+# Copiez ce fichier en .env.local (jamais commité sur GitHub) et remplissez
+# les valeurs depuis Supabase : Project Settings > API
+
+NEXT_PUBLIC_SUPABASE_URL=https://cqzlakeeijjgvqbxqdwu.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxemxha2VlaWpqZ3ZxYnhxZHd1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyOTIwNzcsImV4cCI6MjEwMzg2ODA3N30.KONX1eXymNdzeUzJkDVqtaTLIzi41cQ4CvJ1kuruW2s

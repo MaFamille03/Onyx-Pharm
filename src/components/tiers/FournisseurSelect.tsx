@@ -1,0 +1,56 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+type FournisseurOption = { id: string; nom: string };
+
+export function FournisseurSelect({
+  value,
+  onChange,
+  label = "Fournisseur",
+  optionnel = false,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  label?: string;
+  optionnel?: boolean;
+}) {
+  const supabase = createClient();
+  const [options, setOptions] = useState<FournisseurOption[]>([]);
+
+  useEffect(() => {
+    supabase
+      .from("fournisseurs")
+      .select("id, nom")
+      .eq("statut", "Actif")
+      .order("nom")
+      .then(({ data }) => {
+        if (data) setOptions(data as FournisseurOption[]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+        {label}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={!optionnel}
+        className="w-full rounded-lg border border-onyx-200 bg-white px-3.5 py-2.5 text-[15px] text-onyx-900 outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+      >
+        <option value="">
+          {optionnel ? "— Aucun —" : "— Sélectionner un fournisseur —"}
+        </option>
+        {options.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.nom}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
