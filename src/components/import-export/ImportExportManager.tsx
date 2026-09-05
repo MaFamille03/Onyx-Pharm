@@ -13,7 +13,7 @@ import { logSupabaseError } from "@/lib/errors";
 import { getStockInitialId } from "@/lib/conteneurs";
 import {
   exporterExcel,
-  telechargerModeleExcel,
+  exporterExcelMisEnForme,
   lireFichierExcel,
 } from "@/lib/excel";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
@@ -73,21 +73,12 @@ export function ImportExportManager() {
   }
 
   function telechargerModele() {
-    telechargerModeleExcel("modele-import-articles", COLONNES_MODELE, {
-      Désignation: "Tensiomètre électronique",
-      Catégorie: "Diagnostic",
-      "Sous-catégorie": "Tensiomètres",
-      Marque: "Exemple",
-      Fournisseur: "",
-      "Quantité en stock": 10,
-      "Stock minimum": 5,
-      "Prix de vente conseillé": 70000,
-      Emplacement: emplacements[0]?.nom ?? "Bureau",
-      "Numéro de lot": "",
-      "Date d'expiration": "",
-      Statut: "Actif",
-      Observations: "",
-    });
+    exporterExcelMisEnForme(
+      "Modèle_Articles_Onyx_Pharm",
+      "Modèle",
+      COLONNES_MODELE,
+      []
+    );
   }
 
   function validerLignes(brutes: Record<string, unknown>[]): LigneImport[] {

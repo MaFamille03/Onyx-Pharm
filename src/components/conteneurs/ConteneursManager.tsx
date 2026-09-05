@@ -11,6 +11,7 @@ import { StatutBadge, InlineBanner } from "@/components/ui/Badges";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { PinModal } from "@/components/securite/PinModal";
 import { FournisseurSelect } from "@/components/tiers/FournisseurSelect";
+import { ArticleSelect } from "@/components/articles/ArticleSelect";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
 
@@ -751,6 +752,8 @@ function ConteneurDetail({
   onBack: () => void;
 }) {
   const supabase = createClient();
+  const { emplacements } = useReferenceData();
+  const emplacementsActifs = emplacements.filter((e) => e.actif);
   const [conteneur, setConteneur] = useState<
     (ConteneurRow & { fournisseur_id: string | null }) | null
   >(null);
@@ -788,6 +791,12 @@ function ConteneurDetail({
   const [editObservation, setEditObservation] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [quantitesModifiees, setQuantitesModifiees] = useState<Record<string, string>>({});
+  const [pinEditionOuverte, setPinEditionOuverte] = useState(false);
+  const [ajoutLigneOuvert, setAjoutLigneOuvert] = useState(false);
+  const [ajoutArticleId, setAjoutArticleId] = useState("");
+  const [ajoutEmplacementId, setAjoutEmplacementId] = useState("");
+  const [ajoutQuantite, setAjoutQuantite] = useState("");
 
   const [editionLigne, setEditionLigne] = useState<{
     article_id: string;
@@ -893,6 +902,7 @@ function ConteneurDetail({
     );
     setEditObservation(conteneur.observation ?? "");
     setEditError(null);
+    setQuantitesModifiees({});
     setEditionOuverte(true);
   }
 
@@ -902,6 +912,23 @@ function ConteneurDetail({
       setEditError("Le code du conteneur est obligatoire.");
       return;
     }
+
+    // Des quantités ont été changées : le code PIN est nécessaire pour
+    // les valider (ça touche directement le stock).
+    const desQuantitesOntChange = lignes.some(
+      (l) =>
+        quantitesModifiees[l.id] !== undefined &&
+        Number(quantitesModifiees[l.id]) !== l.quantite
+    );
+    if (desQuantitesOntChange) {
+      setPinEditionOuverte(true);
+      return;
+    }
+
+    await enregistrerModificationConteneur(null);
+  }
+
+  async function enregistrerModificationConteneur(pin: string | null) {
     setEditSaving(true);
     setEditError(null);
 
@@ -914,20 +941,91 @@ function ConteneurDetail({
       p_observation: editObservation.trim() || null,
     });
 
-    setEditSaving(false);
     if (error) {
-      setEditError(
-        logSupabaseError(
-          { table: "conteneurs", operation: "rpc modifier_conteneur" },
-          error,
-          error.code === "23505"
-            ? "Ce code de conteneur existe déjà."
-            : "Impossible d'enregistrer les modifications."
-        )
+      setEditSaving(false);
+      const message = logSupabaseError(
+        { table: "conteneurs", operation: "rpc modifier_conteneur" },
+        error,
+        error.code === "23505"
+          ? "Ce code de conteneur existe déjà."
+          : "Impossible d'enregistrer les modifications."
       );
+      if (pin !== null) throw new Error(message);
+      setEditError(message);
       return;
     }
+
+    if (pin !== null) {
+      for (const l of lignes) {
+        if (
+          quantitesModifiees[l.id] === undefined ||
+          Number(quantitesModifiees[l.id]) === l.quantite
+        )
+          continue;
+        const { error: ligneError } = await supabase.rpc("modifier_ligne_conteneur", {
+          p_conteneur_id: conteneurId,
+          p_article_id: l.article_id,
+          p_emplacement_id: l.emplacement_id,
+          p_nouvelle_quantite: Number(quantitesModifiees[l.id]),
+          p_pin: pin,
+        });
+        if (ligneError) {
+          setEditSaving(false);
+          throw new Error(
+            logSupabaseError(
+              { table: "stocks", operation: "rpc modifier_ligne_conteneur" },
+              ligneError,
+              `Impossible de corriger la quantité de "${l.articles?.designation}".`
+            )
+          );
+        }
+      }
+    }
+
+    setEditSaving(false);
+    setPinEditionOuverte(false);
+    setQuantitesModifiees({});
     setEditionOuverte(false);
+    load();
+  }
+
+  async function confirmerAjoutLigne(pin: string) {
+    if (!ajoutArticleId || !ajoutEmplacementId) {
+      throw new Error("Choisissez un article et un emplacement.");
+    }
+    const qte = Number(ajoutQuantite);
+    if (!qte || qte <= 0) {
+      throw new Error("Quantité invalide.");
+    }
+
+    // Quantité déjà présente pour cet article + cet emplacement dans ce
+    // conteneur (s'il y en a) : modifier_ligne_conteneur fixe une valeur
+    // absolue, donc on ajoute à ce qui existe déjà.
+    const ligneExistante = lignes.find(
+      (l) => l.article_id === ajoutArticleId && l.emplacement_id === ajoutEmplacementId
+    );
+    const nouvelleQuantite = (ligneExistante?.quantite ?? 0) + qte;
+
+    const { error } = await supabase.rpc("modifier_ligne_conteneur", {
+      p_conteneur_id: conteneurId,
+      p_article_id: ajoutArticleId,
+      p_emplacement_id: ajoutEmplacementId,
+      p_nouvelle_quantite: nouvelleQuantite,
+      p_pin: pin,
+    });
+    if (error) {
+      throw new Error(
+        logSupabaseError(
+          { table: "stocks", operation: "rpc modifier_ligne_conteneur" },
+          error,
+          "Impossible d'ajouter cet article au conteneur."
+        )
+      );
+    }
+    setAjoutLigneOuvert(false);
+    setAjoutArticleId("");
+    setAjoutEmplacementId("");
+    setAjoutQuantite("");
     load();
   }
 
@@ -1235,7 +1333,7 @@ function ConteneurDetail({
       )}
 
       {editionOuverte && (
-        <Modal title="Modifier le conteneur" onClose={() => setEditionOuverte(false)}>
+        <Modal title="Modifier le conteneur" onClose={() => setEditionOuverte(false)} wide>
           <form onSubmit={handleModifier} className="space-y-4">
             {editError && <InlineBanner message={editError} />}
             <div>
@@ -1286,6 +1384,56 @@ function ConteneurDetail({
                 className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
               />
             </div>
+
+            <div className="border-t border-onyx-100 pt-4">
+              <p className="mb-2 text-sm font-medium text-onyx-700">
+                Quantités par article
+              </p>
+              <p className="mb-3 text-xs text-onyx-400">
+                Corrigez directement une quantité mal saisie. Le code PIN
+                sera demandé à l&apos;enregistrement.
+              </p>
+              <div className="space-y-2">
+                {lignes.map((l) => (
+                  <div key={l.id} className="flex items-center gap-3">
+                    <span className="flex-1 text-sm text-onyx-600">
+                      {l.articles?.designation}{" "}
+                      <span className="text-onyx-400">
+                        ({l.emplacements?.nom})
+                      </span>
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={quantitesModifiees[l.id] ?? String(l.quantite)}
+                      onChange={(e) =>
+                        setQuantitesModifiees({
+                          ...quantitesModifiees,
+                          [l.id]: e.target.value,
+                        })
+                      }
+                      className="w-24 rounded-md border border-onyx-200 px-2.5 py-1.5 text-right text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                    />
+                  </div>
+                ))}
+                {lignes.length === 0 && (
+                  <p className="text-sm text-onyx-400">
+                    Ce conteneur ne contient plus aucun article.
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAjoutLigneOuvert(true)}
+                className="mt-3 flex items-center gap-1.5 text-sm font-medium text-accent-600 hover:underline"
+              >
+                <Plus size={15} />
+                Ajouter un article à ce conteneur
+              </button>
+            </div>
+
             <div className="flex gap-3 pt-2">
               <SecondaryButton
                 type="button"
@@ -1313,6 +1461,55 @@ function ConteneurDetail({
           onCancel={() => setSuppressionOuverte(false)}
           onConfirm={confirmerSuppressionConteneur}
         />
+      )}
+
+      {pinEditionOuverte && (
+        <PinModal
+          title="Confirmer les corrections de quantité"
+          message="Ce conteneur contient des quantités modifiées. Saisissez votre code PIN pour les enregistrer."
+          onCancel={() => setPinEditionOuverte(false)}
+          onConfirm={enregistrerModificationConteneur}
+        />
+      )}
+
+      {ajoutLigneOuvert && (
+        <PinModal
+          title="Ajouter un article à ce conteneur"
+          message="Le code PIN est requis pour ajouter cet article au conteneur."
+          onCancel={() => setAjoutLigneOuvert(false)}
+          onConfirm={confirmerAjoutLigne}
+        >
+          <div className="mt-3 space-y-3">
+            <ArticleSelect value={ajoutArticleId} onChange={setAjoutArticleId} />
+            <SelectField
+              id="ajout-ligne-emplacement"
+              label="Emplacement"
+              value={ajoutEmplacementId}
+              onChange={(e) => setAjoutEmplacementId(e.target.value)}
+              required
+            >
+              <option value="">— Sélectionner —</option>
+              {emplacementsActifs.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.nom}
+                </option>
+              ))}
+            </SelectField>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Quantité à ajouter
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={ajoutQuantite}
+                onChange={(e) => setAjoutQuantite(e.target.value)}
+                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+              />
+            </div>
+          </div>
+        </PinModal>
       )}
 
       {editionLigne && (
