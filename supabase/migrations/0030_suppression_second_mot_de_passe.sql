@@ -10,7 +10,12 @@
 -- ailleurs. Seule la valeur enregistrée est effacée par prudence.
 -- ============================================================================
 
-create or replace function public.annuler_vente(
+-- PostgreSQL interdit de renommer un paramètre via CREATE OR REPLACE
+-- (seul le corps peut changer à signature égale) — on supprime d'abord
+-- l'ancienne version pour pouvoir renommer p_second_mdp en p_pin.
+drop function if exists public.annuler_vente(uuid, text, uuid);
+
+create function public.annuler_vente(
   p_vente_id uuid,
   p_pin text,
   p_utilisateur_id uuid
