@@ -9,11 +9,14 @@ import { InlineBanner } from "@/components/ui/Badges";
 export function PinModal({
   title = "Confirmation requise",
   message,
+  children,
   onCancel,
   onConfirm,
 }: {
   title?: string;
   message: string;
+  /** Champs supplémentaires affichés au-dessus du code PIN (optionnel). */
+  children?: React.ReactNode;
   onCancel: () => void;
   /** Reçoit le code saisi ; doit lancer une erreur en cas d'échec. */
   onConfirm: (pin: string) => Promise<void>;
@@ -47,6 +50,8 @@ export function PinModal({
           <ShieldAlert size={18} className="mt-0.5 shrink-0 text-red-600" />
           <p className="text-sm text-red-800">{message}</p>
         </div>
+
+        {children}
 
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">

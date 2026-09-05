@@ -13,6 +13,7 @@ import { ConteneurLigneSelect } from "@/components/conteneurs/ConteneurLigneSele
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
 import { SecondPasswordModal } from "@/components/securite/SecondPasswordModal";
+import { PinModal } from "@/components/securite/PinModal";
 import { DocumentImprimable } from "@/components/documents/DocumentImprimable";
 
 type VenteRow = {
@@ -699,6 +700,8 @@ function VenteDetail({
   const [annulationModalOpen, setAnnulationModalOpen] = useState(false);
   const [impressionOpen, setImpressionOpen] = useState(false);
   const [suppressionBrouillonOpen, setSuppressionBrouillonOpen] = useState(false);
+  const [reouvertureOpen, setReouvertureOpen] = useState(false);
+  const [suppressionValideeOpen, setSuppressionValideeOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -776,6 +779,42 @@ function VenteDetail({
       return;
     }
     setSuppressionBrouillonOpen(false);
+    onBack();
+  }
+
+  async function confirmerReouverture(pin: string) {
+    const { error } = await supabase.rpc("rouvrir_vente_en_brouillon", {
+      p_vente_id: venteId,
+      p_pin: pin,
+    });
+    if (error) {
+      throw new Error(
+        logSupabaseError(
+          { table: "ventes", operation: "rpc rouvrir_vente_en_brouillon" },
+          error,
+          "Impossible de rouvrir cette vente pour modification."
+        )
+      );
+    }
+    setReouvertureOpen(false);
+    onEdit();
+  }
+
+  async function confirmerSuppressionValidee(pin: string) {
+    const { error } = await supabase.rpc("supprimer_vente_validee", {
+      p_vente_id: venteId,
+      p_pin: pin,
+    });
+    if (error) {
+      throw new Error(
+        logSupabaseError(
+          { table: "ventes", operation: "rpc supprimer_vente_validee" },
+          error,
+          "Impossible de supprimer cette vente."
+        )
+      );
+    }
+    setSuppressionValideeOpen(false);
     onBack();
   }
 
@@ -900,6 +939,21 @@ function VenteDetail({
             <SecondaryButton onClick={() => setImpressionOpen(true)}>
               <Printer size={16} />
               Imprimer
+            </SecondaryButton>
+          )}
+          {vente.statut !== "Brouillon" && vente.statut !== "Annulé" && (
+            <SecondaryButton onClick={() => setReouvertureOpen(true)}>
+              <Pencil size={16} />
+              Modifier
+            </SecondaryButton>
+          )}
+          {vente.statut !== "Brouillon" && (
+            <SecondaryButton
+              onClick={() => setSuppressionValideeOpen(true)}
+              className="border-red-200 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={16} />
+              Supprimer
             </SecondaryButton>
           )}
           {vente.statut !== "Brouillon" && vente.statut !== "Annulé" && (
@@ -1081,6 +1135,24 @@ function VenteDetail({
           message={`Cette action restituera au stock les quantités vendues pour ${vente.reference} et ne peut pas être défaite. Les paiements déjà reçus (${vente.montant_paye.toLocaleString("fr-FR")} FCFA) ne seront pas remboursés automatiquement.`}
           onCancel={() => setAnnulationModalOpen(false)}
           onConfirm={annulerVenteAvecMotDePasse}
+        />
+      )}
+
+      {reouvertureOpen && (
+        <PinModal
+          title="Modifier cette vente"
+          message={`Le stock vendu pour ${vente.reference} sera restitué et la vente repassera en brouillon, modifiable. Refusé si un paiement a déjà été enregistré (supprimez-le d'abord depuis Ventes > Paiements).`}
+          onCancel={() => setReouvertureOpen(false)}
+          onConfirm={confirmerReouverture}
+        />
+      )}
+
+      {suppressionValideeOpen && (
+        <PinModal
+          title="Supprimer cette vente"
+          message={`Supprimer définitivement la vente ${vente.reference} ? Le stock déjà vendu sera restitué et les paiements associés seront retirés de la caisse. Cette action est irréversible.`}
+          onCancel={() => setSuppressionValideeOpen(false)}
+          onConfirm={confirmerSuppressionValidee}
         />
       )}
 

@@ -757,6 +757,8 @@ function ConteneurDetail({
   const [lignes, setLignes] = useState<
     {
       id: string;
+      article_id: string;
+      emplacement_id: string;
       quantite: number;
       articles: { designation: string } | null;
       emplacements: { nom: string } | null;
@@ -787,6 +789,13 @@ function ConteneurDetail({
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const [editionLigne, setEditionLigne] = useState<{
+    article_id: string;
+    emplacement_id: string;
+    designation: string;
+    quantiteActuelle: number;
+  } | null>(null);
+  const [nouvelleQuantiteLigne, setNouvelleQuantiteLigne] = useState("");
   const [suppressionOuverte, setSuppressionOuverte] = useState(false);
 
   const load = useCallback(async () => {
@@ -801,7 +810,7 @@ function ConteneurDetail({
         .single(),
       supabase
         .from("stocks")
-        .select("id, quantite, articles(designation), emplacements(nom)")
+        .select("id, article_id, emplacement_id, quantite, articles(designation), emplacements(nom)")
         .eq("conteneur_id", conteneurId)
         .gt("quantite", 0),
       supabase
@@ -938,6 +947,32 @@ function ConteneurDetail({
     }
     setSuppressionOuverte(false);
     onBack();
+  }
+
+  async function confirmerModificationLigne(pin: string) {
+    if (!editionLigne) return;
+    const val = Number(nouvelleQuantiteLigne);
+    if (Number.isNaN(val) || val < 0) {
+      throw new Error("Quantité invalide.");
+    }
+    const { error } = await supabase.rpc("modifier_ligne_conteneur", {
+      p_conteneur_id: conteneurId,
+      p_article_id: editionLigne.article_id,
+      p_emplacement_id: editionLigne.emplacement_id,
+      p_nouvelle_quantite: val,
+      p_pin: pin,
+    });
+    if (error) {
+      throw new Error(
+        logSupabaseError(
+          { table: "stocks", operation: "rpc modifier_ligne_conteneur" },
+          error,
+          "Impossible de corriger cette quantité."
+        )
+      );
+    }
+    setEditionLigne(null);
+    load();
   }
 
   if (loading || !conteneur) {
@@ -1089,12 +1124,13 @@ function ConteneurDetail({
               <th className="px-4 py-3">Article</th>
               <th className="px-4 py-3">Emplacement</th>
               <th className="px-4 py-3 text-right">Quantité restante</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {lignes.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-onyx-400">
+                <td colSpan={4} className="px-4 py-6 text-center text-onyx-400">
                   Ce conteneur ne contient plus aucun article en stock.
                 </td>
               </tr>
@@ -1106,6 +1142,23 @@ function ConteneurDetail({
                   </td>
                   <td className="px-4 py-2.5 text-onyx-500">{l.emplacements?.nom}</td>
                   <td className="px-4 py-2.5 text-right text-onyx-600">{l.quantite}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button
+                      onClick={() => {
+                        setEditionLigne({
+                          article_id: l.article_id,
+                          emplacement_id: l.emplacement_id,
+                          designation: l.articles?.designation ?? "",
+                          quantiteActuelle: l.quantite,
+                        });
+                        setNouvelleQuantiteLigne(String(l.quantite));
+                      }}
+                      className="rounded-md p-1.5 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
+                      aria-label="Modifier la quantité"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
@@ -1254,12 +1307,30 @@ function ConteneurDetail({
           title="Supprimer ce conteneur"
           message={
             (coutRevient?.stock_restant ?? 0) > 0
-              ? `Ce conteneur contient encore ${coutRevient?.stock_restant} unité(s) en stock : la suppression sera refusée tant qu'il n'est pas entièrement écoulé ou transféré.`
+              ? `Ce conteneur contient encore ${coutRevient?.stock_restant} unité(s) en stock : elles seront automatiquement transférées vers Stock Initial avant la suppression. Refusé si des ventes y font déjà référence.`
               : `Supprimer définitivement le conteneur "${conteneur.code}" ? Refusé automatiquement si des ventes y font déjà référence.`
           }
           onCancel={() => setSuppressionOuverte(false)}
           onConfirm={confirmerSuppressionConteneur}
         />
+      )}
+
+      {editionLigne && (
+        <PinModal
+          title="Corriger cette quantité"
+          message={`Nouvelle quantité pour "${editionLigne.designation}" dans ce conteneur (actuellement ${editionLigne.quantiteActuelle}) :`}
+          onCancel={() => setEditionLigne(null)}
+          onConfirm={confirmerModificationLigne}
+        >
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={nouvelleQuantiteLigne}
+            onChange={(e) => setNouvelleQuantiteLigne(e.target.value)}
+            className="mt-3 w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </PinModal>
       )}
     </div>
   );
