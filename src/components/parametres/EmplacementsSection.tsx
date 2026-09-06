@@ -7,6 +7,7 @@ import { logSupabaseError } from "@/lib/errors";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 type Emplacement = {
   id: string;
@@ -21,6 +22,7 @@ export function EmplacementsSection() {
   const [nouveauNom, setNouveauNom] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aSupprimer, setASupprimer] = useState<Emplacement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,9 +84,9 @@ export function EmplacementsSection() {
   }
 
   async function supprimer(item: Emplacement) {
-    if (!confirm(`Supprimer définitivement "${item.nom}" ?`)) return;
     setError(null);
     const { error } = await supabase.from("emplacements").delete().eq("id", item.id);
+    setASupprimer(null);
     if (error) {
       setError(
         error.code === "23503"
@@ -158,7 +160,7 @@ export function EmplacementsSection() {
                   {item.actif ? "Désactiver" : "Réactiver"}
                 </SecondaryButton>
                 <button
-                  onClick={() => supprimer(item)}
+                  onClick={() => setASupprimer(item)}
                   className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
                   aria-label="Supprimer"
                 >
@@ -169,6 +171,15 @@ export function EmplacementsSection() {
           ))
         )}
       </div>
+
+      {aSupprimer && (
+        <ConfirmModal
+          title="Supprimer cet emplacement"
+          message={`Supprimer définitivement "${aSupprimer.nom}" ? Cette action est irréversible.`}
+          onCancel={() => setASupprimer(null)}
+          onConfirm={() => supprimer(aSupprimer)}
+        />
+      )}
     </div>
   );
 }

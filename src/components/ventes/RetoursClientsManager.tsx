@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Pencil, Trash2, ArrowLeftRight } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowLeftRight, PackageCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { Modal } from "@/components/ui/Modal";
-import { ArticleSelect } from "@/components/articles/ArticleSelect";
+import { ClientSelect } from "@/components/tiers/ClientSelect";
 import { SelectField } from "@/components/ui/FormControls";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
@@ -24,6 +24,17 @@ type RetourRow = {
   emplacements: { nom: string } | null;
 };
 
+type LigneAchetee = {
+  ligne_id: string;
+  vente_id: string;
+  vente_reference: string;
+  date_vente: string;
+  article_id: string;
+  designation: string;
+  quantite_achetee: number;
+  prix_vente_reel: number;
+};
+
 export function RetoursClientsManager() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
@@ -33,7 +44,10 @@ export function RetoursClientsManager() {
   const [loading, setLoading] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [articleId, setArticleId] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [lignesAchetees, setLignesAchetees] = useState<LigneAchetee[]>([]);
+  const [chargementAchats, setChargementAchats] = useState(false);
+  const [ligneChoisie, setLigneChoisie] = useState<LigneAchetee | null>(null);
   const [emplacementId, setEmplacementId] = useState("");
   const [quantite, setQuantite] = useState("");
   const [motif, setMotif] = useState("");
@@ -69,7 +83,9 @@ export function RetoursClientsManager() {
   useRealtimeRefresh(["retours_clients"], load);
 
   function openCreate() {
-    setArticleId("");
+    setClientId("");
+    setLignesAchetees([]);
+    setLigneChoisie(null);
     setEmplacementId("");
     setQuantite("");
     setMotif("");
@@ -78,17 +94,81 @@ export function RetoursClientsManager() {
     setModalOpen(true);
   }
 
+  // Dès qu'un client est choisi : va chercher ce qu'il a réellement
+  // acheté (article, quantité, vente d'origine), pour choisir dedans
+  // plutôt que de saisir un article au hasard.
+  useEffect(() => {
+    setLigneChoisie(null);
+    setLignesAchetees([]);
+    if (!clientId) return;
+
+    let annule = false;
+    setChargementAchats(true);
+    supabase
+      .from("lignes_ventes")
+      .select(
+        "id, quantite, prix_vente_reel, article_id, articles(designation), ventes!inner(id, reference, date_vente, statut, client_id)"
+      )
+      .eq("ventes.client_id", clientId)
+      .neq("ventes.statut", "Brouillon")
+      .neq("ventes.statut", "Annulé")
+      .order("id", { ascending: false })
+      .then(({ data }) => {
+        if (annule) return;
+        const lignes: LigneAchetee[] = (data ?? []).map((l) => {
+          const vente = l.ventes as unknown as {
+            id: string;
+            reference: string;
+            date_vente: string;
+          };
+          return {
+            ligne_id: l.id,
+            vente_id: vente.id,
+            vente_reference: vente.reference,
+            date_vente: vente.date_vente,
+            article_id: l.article_id,
+            designation: (l.articles as unknown as { designation: string } | null)
+              ?.designation ?? "—",
+            quantite_achetee: l.quantite,
+            prix_vente_reel: l.prix_vente_reel,
+          };
+        });
+        setLignesAchetees(lignes);
+        setChargementAchats(false);
+      });
+
+    return () => {
+      annule = true;
+    };
+  }, [clientId, supabase]);
+
+  function choisirLigne(l: LigneAchetee) {
+    setLigneChoisie(l);
+    setQuantite(String(l.quantite_achetee));
+    setMontantImpact(String(l.quantite_achetee * l.prix_vente_reel));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (!articleId || !emplacementId) {
-      setError("Article et emplacement obligatoires.");
+    if (!ligneChoisie) {
+      setError("Choisissez l'article acheté à retourner.");
+      return;
+    }
+    if (!emplacementId) {
+      setError("Choisissez l'emplacement où remettre l'article en stock.");
       return;
     }
     const qte = Number(quantite);
     if (!qte || qte <= 0) {
       setError("Quantité invalide.");
+      return;
+    }
+    if (qte > ligneChoisie.quantite_achetee) {
+      setError(
+        `Le client n'a acheté que ${ligneChoisie.quantite_achetee} unité(s) sur cette vente.`
+      );
       return;
     }
 
@@ -98,8 +178,8 @@ export function RetoursClientsManager() {
     } = await supabase.auth.getUser();
 
     const { error } = await supabase.rpc("effectuer_retour_client", {
-      p_vente_id: null,
-      p_article_id: articleId,
+      p_vente_id: ligneChoisie.vente_id,
+      p_article_id: ligneChoisie.article_id,
       p_emplacement_id: emplacementId,
       p_quantite: qte,
       p_motif: motif.trim() || null,
@@ -254,68 +334,145 @@ export function RetoursClientsManager() {
         <Modal
           title="Nouveau retour client"
           onClose={() => setModalOpen(false)}
+          wide
         >
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && <InlineBanner message={error} />}
 
-            <ArticleSelect value={articleId} onChange={setArticleId} />
-
-            <SelectField
-              id="emplacement-retour-client"
-              label="Emplacement (entrée)"
-              value={emplacementId}
-              onChange={(e) => setEmplacementId(e.target.value)}
-              required
-            >
-              <option value="">— Sélectionner —</option>
-              {emplacementsActifs.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.nom}
-                </option>
-              ))}
-            </SelectField>
-
+            {/* Étape 1 — le client */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-                Quantité
-              </label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                required
-                value={quantite}
-                onChange={(e) => setQuantite(e.target.value)}
-                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-              />
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-onyx-400">
+                1. Client concerné
+              </p>
+              <ClientSelect value={clientId} onChange={setClientId} />
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-                Motif
-              </label>
-              <input
-                value={motif}
-                onChange={(e) => setMotif(e.target.value)}
-                placeholder="Ex : produit défectueux, erreur de commande..."
-                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-              />
-            </div>
+            {/* Étape 2 — ce qu'il a acheté */}
+            {clientId && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-onyx-400">
+                  2. Article acheté à retourner
+                </p>
+                {chargementAchats ? (
+                  <p className="text-sm text-onyx-400">Chargement des achats...</p>
+                ) : lignesAchetees.length === 0 ? (
+                  <p className="rounded-lg bg-onyx-50 px-3.5 py-3 text-sm text-onyx-500">
+                    Ce client n&apos;a aucun achat validé enregistré.
+                  </p>
+                ) : (
+                  <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-onyx-100 p-2">
+                    {lignesAchetees.map((l) => (
+                      <button
+                        key={l.ligne_id}
+                        type="button"
+                        onClick={() => choisirLigne(l)}
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-colors ${
+                          ligneChoisie?.ligne_id === l.ligne_id
+                            ? "bg-accent-50 ring-1 ring-accent-300"
+                            : "hover:bg-onyx-50"
+                        }`}
+                      >
+                        <span>
+                          <span className="block text-sm font-medium text-onyx-800">
+                            {l.designation}
+                          </span>
+                          <span className="block text-xs text-onyx-400">
+                            {l.vente_reference} ·{" "}
+                            {new Date(l.date_vente).toLocaleDateString("fr-FR")}
+                          </span>
+                        </span>
+                        <span className="text-sm font-medium text-onyx-600">
+                          {l.quantite_achetee} unité{l.quantite_achetee > 1 ? "s" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-                Impact financier (optionnel, FCFA)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={montantImpact}
-                onChange={(e) => setMontantImpact(e.target.value)}
-                placeholder="0"
-                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-              />
-            </div>
+            {/* Étape 3 — quantité et destination */}
+            {ligneChoisie && (
+              <div className="rounded-lg bg-onyx-50 p-4">
+                <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-onyx-400">
+                  <PackageCheck size={13} />
+                  3. Détails du retour
+                </p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                      Quantité retournée
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max={ligneChoisie.quantite_achetee}
+                      step="1"
+                      required
+                      value={quantite}
+                      onChange={(e) => setQuantite(e.target.value)}
+                      className="w-full rounded-lg border border-onyx-200 bg-white px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                    />
+                    <p className="mt-1 text-xs text-onyx-400">
+                      Sur {ligneChoisie.quantite_achetee} acheté(s)
+                    </p>
+                  </div>
+                  <SelectField
+                    id="emplacement-retour-client"
+                    label="Emplacement de remise en stock"
+                    value={emplacementId}
+                    onChange={(e) => setEmplacementId(e.target.value)}
+                    required
+                  >
+                    <option value="">— Sélectionner —</option>
+                    {emplacementsActifs.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.nom}
+                      </option>
+                    ))}
+                  </SelectField>
+                </div>
+              </div>
+            )}
+
+            {/* Étape 4 — le reste des informations */}
+            {ligneChoisie && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-onyx-400">
+                  4. Autres informations
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                      Motif
+                    </label>
+                    <input
+                      value={motif}
+                      onChange={(e) => setMotif(e.target.value)}
+                      placeholder="Ex : produit défectueux, erreur de commande..."
+                      className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                      Impact financier (remboursement, FCFA)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={montantImpact}
+                      onChange={(e) => setMontantImpact(e.target.value)}
+                      className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                    />
+                    <p className="mt-1 text-xs text-onyx-400">
+                      Pré-rempli selon le prix de vente réel — modifiable si le
+                      remboursement diffère.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-3 pt-2">
               <SecondaryButton
@@ -325,9 +482,14 @@ export function RetoursClientsManager() {
               >
                 Annuler
               </SecondaryButton>
-              <PrimaryButton type="submit" loading={saving} className="flex-1">
+              <PrimaryButton
+                type="submit"
+                loading={saving}
+                disabled={!ligneChoisie}
+                className="flex-1"
+              >
                 <ArrowLeftRight size={16} />
-                Enregistrer
+                Enregistrer le retour
               </PrimaryButton>
             </div>
           </form>

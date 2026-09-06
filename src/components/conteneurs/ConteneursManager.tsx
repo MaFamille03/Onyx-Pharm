@@ -820,7 +820,9 @@ function ConteneurDetail({
   const [coutRevient, setCoutRevient] = useState<{
     stock_restant: number;
     revenu_realise: number;
-    marge: number | null;
+    cout_unitaire: number | null;
+    marge_realisee: number | null;
+    marge_finale: number | null;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -880,7 +882,7 @@ function ConteneurDetail({
         .order("date_paiement", { ascending: false }),
       supabase
         .from("v_cout_revient_conteneurs")
-        .select("stock_restant, revenu_realise, marge")
+        .select("stock_restant, revenu_realise, cout_unitaire, marge_realisee, marge_finale")
         .eq("conteneur_id", conteneurId)
         .maybeSingle(),
     ]);
@@ -1222,7 +1224,8 @@ function ConteneurDetail({
 
       {/* Coût de revient : uniquement calculable quand le conteneur est
           entièrement écoulé (plus aucun stock) et qu'un montant d'achat a
-          été renseigné. Toujours recalculé à la volée. */}
+          été renseigné. Toujours recalculé à la volée, y compris de
+          façon progressive avant même que le conteneur soit épuisé. */}
       <div className="mt-5 rounded-xl border border-onyx-100 bg-white p-4">
         <h2 className="text-sm font-semibold text-onyx-800">
           Coût de revient du conteneur
@@ -1232,37 +1235,58 @@ function ConteneurDetail({
             Non calculable : aucun montant d&apos;achat renseigné pour ce
             conteneur.
           </p>
-        ) : coutRevient && coutRevient.stock_restant > 0 ? (
-          <p className="mt-1.5 text-sm text-onyx-400">
-            Conteneur pas encore entièrement écoulé ({coutRevient.stock_restant}{" "}
-            unité{coutRevient.stock_restant > 1 ? "s" : ""} restante
-            {coutRevient.stock_restant > 1 ? "s" : ""}) — le coût de revient
-            sera calculé automatiquement une fois tout vendu.
-          </p>
         ) : coutRevient ? (
-          <div className="mt-3 grid grid-cols-3 gap-3">
-            <div className="text-center">
-              <p className="text-sm font-medium text-onyx-700">
-                {coutRevient.revenu_realise.toLocaleString("fr-FR")}
-              </p>
-              <p className="text-xs text-onyx-400">Revenu réalisé</p>
+          <div>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="text-center">
+                <p className="text-sm font-medium text-onyx-700">
+                  {coutRevient.cout_unitaire !== null
+                    ? coutRevient.cout_unitaire.toLocaleString("fr-FR", {
+                        maximumFractionDigits: 2,
+                      })
+                    : "—"}
+                </p>
+                <p className="text-xs text-onyx-400">Coût unitaire</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-onyx-700">
+                  {coutRevient.revenu_realise.toLocaleString("fr-FR")}
+                </p>
+                <p className="text-xs text-onyx-400">Revenu déjà encaissé</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-onyx-700">
+                  {conteneur.montant_achat_global!.toLocaleString("fr-FR")}
+                </p>
+                <p className="text-xs text-onyx-400">Coût d&apos;achat total</p>
+              </div>
+              <div className="text-center">
+                <p
+                  className={`text-sm font-semibold ${
+                    (coutRevient.marge_realisee ?? 0) >= 0
+                      ? "text-emerald-600"
+                      : "text-red-500"
+                  }`}
+                >
+                  {(coutRevient.marge_realisee ?? 0).toLocaleString("fr-FR")}
+                </p>
+                <p className="text-xs text-onyx-400">Marge déjà réalisée</p>
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-onyx-700">
-                {conteneur.montant_achat_global!.toLocaleString("fr-FR")}
+
+            {coutRevient.stock_restant > 0 ? (
+              <p className="mt-3 text-xs text-onyx-400">
+                {coutRevient.stock_restant} unité
+                {coutRevient.stock_restant > 1 ? "s" : ""} encore en stock sur
+                ce conteneur — la marge ci-dessus n&apos;est donc que la
+                partie déjà vendue ; elle continuera d&apos;évoluer.
               </p>
-              <p className="text-xs text-onyx-400">Coût d&apos;achat</p>
-            </div>
-            <div className="text-center">
-              <p
-                className={`text-sm font-semibold ${
-                  (coutRevient.marge ?? 0) >= 0 ? "text-emerald-600" : "text-red-500"
-                }`}
-              >
-                {(coutRevient.marge ?? 0).toLocaleString("fr-FR")}
+            ) : (
+              <p className="mt-3 text-xs text-emerald-600">
+                Conteneur entièrement écoulé — la marge affichée est
+                définitive.
               </p>
-              <p className="text-xs text-onyx-400">Marge du conteneur</p>
-            </div>
+            )}
           </div>
         ) : (
           <p className="mt-1.5 text-sm text-onyx-400">Chargement...</p>

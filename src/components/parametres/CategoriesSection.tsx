@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Plus, ChevronDown, Tag, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
@@ -27,6 +28,9 @@ export function CategoriesSection() {
   const [nouvelleSousCategorie, setNouvelleSousCategorie] = useState("");
   const [savingSousCategorie, setSavingSousCategorie] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categorieASupprimer, setCategorieASupprimer] = useState<Categorie | null>(null);
+  const [sousCategorieASupprimer, setSousCategorieASupprimer] =
+    useState<SousCategorie | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,10 +137,9 @@ export function CategoriesSection() {
   }
 
   async function supprimerCategorie(item: Categorie) {
-    if (!confirm(`Supprimer définitivement "${item.nom}" et ses sous-catégories ?`))
-      return;
     setError(null);
     const { error } = await supabase.from("categories").delete().eq("id", item.id);
+    setCategorieASupprimer(null);
     if (error) {
       setError(
         error.code === "23503"
@@ -153,12 +156,12 @@ export function CategoriesSection() {
   }
 
   async function supprimerSousCategorie(item: SousCategorie) {
-    if (!confirm(`Supprimer définitivement "${item.nom}" ?`)) return;
     setError(null);
     const { error } = await supabase
       .from("sous_categories")
       .delete()
       .eq("id", item.id);
+    setSousCategorieASupprimer(null);
     if (error) {
       setError(
         error.code === "23503"
@@ -262,7 +265,7 @@ export function CategoriesSection() {
                           : "Réactiver la catégorie"}
                       </SecondaryButton>
                       <button
-                        onClick={() => supprimerCategorie(cat)}
+                        onClick={() => setCategorieASupprimer(cat)}
                         className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
                         aria-label="Supprimer la catégorie"
                       >
@@ -298,7 +301,7 @@ export function CategoriesSection() {
                               {sc.actif ? "Désactiver" : "Réactiver"}
                             </button>
                             <button
-                              onClick={() => supprimerSousCategorie(sc)}
+                              onClick={() => setSousCategorieASupprimer(sc)}
                               className="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
                               aria-label="Supprimer"
                             >
@@ -333,6 +336,24 @@ export function CategoriesSection() {
           })
         )}
       </div>
+
+      {categorieASupprimer && (
+        <ConfirmModal
+          title="Supprimer cette catégorie"
+          message={`Supprimer définitivement "${categorieASupprimer.nom}" et ses sous-catégories ? Cette action est irréversible.`}
+          onCancel={() => setCategorieASupprimer(null)}
+          onConfirm={() => supprimerCategorie(categorieASupprimer)}
+        />
+      )}
+
+      {sousCategorieASupprimer && (
+        <ConfirmModal
+          title="Supprimer cette sous-catégorie"
+          message={`Supprimer définitivement "${sousCategorieASupprimer.nom}" ? Cette action est irréversible.`}
+          onCancel={() => setSousCategorieASupprimer(null)}
+          onConfirm={() => supprimerSousCategorie(sousCategorieASupprimer)}
+        />
+      )}
     </div>
   );
 }
