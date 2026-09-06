@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowLeftRight, History } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
@@ -24,6 +24,50 @@ export function MouvementModal({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Stock de l'article sélectionné, par emplacement (chargé dès qu'un
+  // article est choisi, pour filtrer "Depuis"/"Vers" et afficher l'aide.
+  const [stockParEmplacement, setStockParEmplacement] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    setSourceId("");
+    setDestinationId("");
+    if (!articleId) {
+      setStockParEmplacement({});
+      return;
+    }
+    let annule = false;
+    supabase
+      .from("stocks")
+      .select("emplacement_id, quantite")
+      .eq("article_id", articleId)
+      .then(({ data }) => {
+        if (annule) return;
+        const cumul: Record<string, number> = {};
+        for (const s of data ?? []) {
+          cumul[s.emplacement_id] = (cumul[s.emplacement_id] ?? 0) + s.quantite;
+        }
+        setStockParEmplacement(cumul);
+      });
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleId]);
+
+  // "Depuis" : uniquement les emplacements où cet article a du stock.
+  const emplacementsSource = articleId
+    ? emplacementsActifs.filter((e) => (stockParEmplacement[e.id] ?? 0) > 0)
+    : emplacementsActifs;
+
+  // "Vers" : uniquement les emplacements où cet article n'est pas
+  // encore présent (pour éviter de le mélanger par erreur avec un
+  // stock déjà existant ailleurs).
+  const emplacementsDestination = articleId
+    ? emplacementsActifs.filter((e) => (stockParEmplacement[e.id] ?? 0) === 0)
+    : emplacementsActifs;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,8 +146,10 @@ export function MouvementModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setSourceId(e.target.value)}
             required
           >
-            <option value="">— Emplacement source —</option>
-            {emplacementsActifs.map((e) => (
+            <option value="">
+              {articleId ? "— Emplacement source —" : "— Choisissez d'abord un article —"}
+            </option>
+            {emplacementsSource.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.nom}
               </option>
@@ -116,14 +162,21 @@ export function MouvementModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setDestinationId(e.target.value)}
             required
           >
-            <option value="">— Emplacement destination —</option>
-            {emplacementsActifs.map((e) => (
+            <option value="">
+              {articleId ? "— Emplacement destination —" : "— Choisissez d'abord un article —"}
+            </option>
+            {emplacementsDestination.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.nom}
               </option>
             ))}
           </SelectField>
         </div>
+        {articleId && emplacementsSource.length === 0 && (
+          <p className="-mt-2 text-xs text-red-500">
+            Cet article n&apos;a de stock dans aucun emplacement.
+          </p>
+        )}
 
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">
@@ -139,6 +192,15 @@ export function MouvementModal({ onClose }: { onClose: () => void }) {
             className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
           />
         </div>
+
+        {articleId && sourceId && (
+          <div className="rounded-lg bg-onyx-50 px-3.5 py-2.5 text-sm text-onyx-600">
+            Quantité disponible dans cet emplacement :{" "}
+            <span className="font-semibold text-onyx-900">
+              {stockParEmplacement[sourceId] ?? 0}
+            </span>
+          </div>
+        )}
 
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">

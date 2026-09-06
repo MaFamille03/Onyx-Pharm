@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, Search, LogOut, ChevronDown, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { ArticleInfoPanel } from "@/components/articles/ArticleInfoPanel";
+import { GlobalSearchPanel } from "@/components/GlobalSearchPanel";
 
 export function TopBar({
   userEmail,
@@ -47,7 +47,7 @@ export function TopBar({
             type="search"
             value={terme}
             onChange={(e) => setTerme(e.target.value)}
-            placeholder="Rechercher un article par nom..."
+            placeholder="Rechercher un article, un client, un fournisseur, une vente..."
             className="w-full rounded-lg border border-onyx-100 bg-onyx-50/50 py-2 pl-9 pr-3 text-sm text-onyx-700 outline-none placeholder:text-onyx-300 focus:border-accent-400 focus:bg-white focus:ring-2 focus:ring-accent-100"
           />
         </div>
@@ -101,7 +101,7 @@ export function TopBar({
       {terme.trim() && (
         <div className="hidden px-4 pt-3 sm:block">
           <div className="mx-auto max-w-3xl">
-            <ArticleInfoPanel designation={terme} />
+            <GlobalSearchPanel terme={terme} />
           </div>
         </div>
       )}

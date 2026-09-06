@@ -27,7 +27,15 @@ type DetailArticle = {
  * modification ni suppression possibles ici. Se met à jour dès que
  * `designation` change, et disparaît si elle devient vide.
  */
-export function ArticleInfoPanel({ designation }: { designation: string }) {
+export function ArticleInfoPanel({
+  designation,
+  id,
+}: {
+  designation: string;
+  /** Si fourni, va chercher directement cet article par id (saute la
+   * recherche par nom) — utilisé quand l'appelant a déjà résolu le choix. */
+  id?: string;
+}) {
   const [correspondances, setCorrespondances] = useState<
     { id: string; designation: string }[]
   >([]);
@@ -35,13 +43,37 @@ export function ArticleInfoPanel({ designation }: { designation: string }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let annule = false;
+
+    async function chargerDetail(articleId: string) {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("articles")
+        .select(
+          "id, designation, marque, prix_vente_conseille, stock_minimum, statut, date_expiration, categories(nom), fournisseurs(nom), stocks(quantite, emplacements(nom), conteneurs(code))"
+        )
+        .eq("id", articleId)
+        .maybeSingle();
+      if (!annule) {
+        setArticle(data as unknown as DetailArticle | null);
+        setLoading(false);
+      }
+    }
+
+    if (id) {
+      setLoading(true);
+      chargerDetail(id);
+      return () => {
+        annule = true;
+      };
+    }
+
     const requete = designation.trim();
     if (!requete) {
       setArticle(null);
       setCorrespondances([]);
       return;
     }
-    let annule = false;
     setLoading(true);
     const supabase = createClient();
     supabase
@@ -63,24 +95,10 @@ export function ArticleInfoPanel({ designation }: { designation: string }) {
         }
       });
 
-    async function chargerDetail(id: string) {
-      const { data } = await supabase
-        .from("articles")
-        .select(
-          "id, designation, marque, prix_vente_conseille, stock_minimum, statut, date_expiration, categories(nom), fournisseurs(nom), stocks(quantite, emplacements(nom), conteneurs(code))"
-        )
-        .eq("id", id)
-        .maybeSingle();
-      if (!annule) {
-        setArticle(data as unknown as DetailArticle | null);
-        setLoading(false);
-      }
-    }
-
     return () => {
       annule = true;
     };
-  }, [designation]);
+  }, [designation, id]);
 
   async function choisir(id: string) {
     setLoading(true);
@@ -97,7 +115,7 @@ export function ArticleInfoPanel({ designation }: { designation: string }) {
     setLoading(false);
   }
 
-  if (!designation.trim()) return null;
+  if (!id && !designation.trim()) return null;
 
   const stockTotal = article
     ? article.stocks.reduce((s, l) => s + l.quantite, 0)
