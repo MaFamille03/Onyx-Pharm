@@ -443,7 +443,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                     <th className="px-4 py-3">Catégorie</th>
                     <th className="px-4 py-3">Fournisseur</th>
                     <th className="px-4 py-3 text-right">Prix vente référence</th>
-                    <th className="px-4 py-3 text-right">Stock</th>
+                    <th className="px-4 py-3 text-right">Stock (cliquer pour corriger)</th>
                     <th className="px-4 py-3">Statut</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -506,16 +506,19 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                             {a.prix_vente_conseille.toLocaleString("fr-FR")}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <span
-                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                            <button
+                              onClick={() => setExpandedId(estOuvert ? null : a.id)}
+                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                                 a.stockFaible
-                                  ? "bg-red-50 text-red-600"
-                                  : "bg-onyx-50 text-onyx-600"
+                                  ? "bg-red-50 text-red-600 hover:bg-red-100"
+                                  : "bg-onyx-50 text-onyx-600 hover:bg-accent-50 hover:text-accent-700"
                               }`}
+                              title="Voir le détail et corriger le stock"
                             >
                               {a.stockFaible && <AlertTriangle size={11} />}
                               {a.stockTotal}
-                            </span>
+                              <Pencil size={10} className="opacity-60" />
+                            </button>
                           </td>
                           <td className="px-4 py-3">
                             <StatutBadge statut={a.statut} />
@@ -586,10 +589,10 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                                               info.total
                                             )
                                           }
-                                          className="rounded-md p-1 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
-                                          aria-label="Corriger la quantité"
+                                          className="flex items-center gap-1.5 rounded-md border border-accent-200 bg-accent-50 px-2.5 py-1.5 text-xs font-medium text-accent-700 hover:bg-accent-100"
                                         >
                                           <Pencil size={13} />
+                                          Corriger le stock
                                         </button>
                                       </div>
                                     </div>

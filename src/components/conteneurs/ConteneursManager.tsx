@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Package2, Plus, ArrowLeft, Pencil, Trash2, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, CreditCard } from "lucide-react";
+import { Package2, Plus, ArrowLeft, Pencil, Trash2, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, CreditCard, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { lireFichierExcel, exporterExcelMisEnForme } from "@/lib/excel";
@@ -809,6 +809,7 @@ function ConteneurDetail({
       article_id: string;
       emplacement_id: string;
       quantite: number;
+      quantite_initiale: number | null;
       articles: { designation: string } | null;
       emplacements: { nom: string } | null;
     }[]
@@ -841,6 +842,7 @@ function ConteneurDetail({
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [quantitesModifiees, setQuantitesModifiees] = useState<Record<string, string>>({});
+  const [rechercheLigne, setRechercheLigne] = useState("");
   const [pinEditionOuverte, setPinEditionOuverte] = useState(false);
   const [ajoutLigneOuvert, setAjoutLigneOuvert] = useState(false);
   const [ajoutArticleId, setAjoutArticleId] = useState("");
@@ -868,7 +870,7 @@ function ConteneurDetail({
         .single(),
       supabase
         .from("stocks")
-        .select("id, article_id, emplacement_id, quantite, articles(designation), emplacements(nom)")
+        .select("id, article_id, emplacement_id, quantite, quantite_initiale, articles(designation), emplacements(nom)")
         .eq("conteneur_id", conteneurId)
         .gt("quantite", 0),
       supabase
@@ -953,6 +955,7 @@ function ConteneurDetail({
     setEditObservation(conteneur.observation ?? "");
     setEditError(null);
     setQuantitesModifiees({});
+    setRechercheLigne("");
     setEditionOuverte(true);
   }
 
@@ -1272,6 +1275,7 @@ function ConteneurDetail({
             <tr className="border-b border-onyx-100 bg-onyx-50/50 text-left text-xs font-medium uppercase tracking-wide text-onyx-400">
               <th className="px-4 py-3">Article</th>
               <th className="px-4 py-3">Emplacement</th>
+              <th className="px-4 py-3 text-right">Quantité initiale</th>
               <th className="px-4 py-3 text-right">Quantité restante</th>
               <th className="px-4 py-3" />
             </tr>
@@ -1279,7 +1283,7 @@ function ConteneurDetail({
           <tbody>
             {lignes.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-onyx-400">
+                <td colSpan={5} className="px-4 py-6 text-center text-onyx-400">
                   Ce conteneur ne contient plus aucun article en stock.
                 </td>
               </tr>
@@ -1290,6 +1294,9 @@ function ConteneurDetail({
                     {l.articles?.designation}
                   </td>
                   <td className="px-4 py-2.5 text-onyx-500">{l.emplacements?.nom}</td>
+                  <td className="px-4 py-2.5 text-right text-onyx-400">
+                    {l.quantite_initiale ?? "—"}
+                  </td>
                   <td className="px-4 py-2.5 text-right text-onyx-600">{l.quantite}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button
@@ -1314,6 +1321,11 @@ function ConteneurDetail({
           </tbody>
         </table>
       </div>
+      <p className="mt-1.5 text-xs text-onyx-400">
+        La quantité initiale est figée dès l&apos;arrivée du conteneur et ne
+        change jamais, même après une correction — elle sert de repère
+        historique.
+      </p>
 
       {montantDefini && (
         <div className="mt-5">
@@ -1456,8 +1468,31 @@ function ConteneurDetail({
                 Corrigez directement une quantité mal saisie. Le code PIN
                 sera demandé à l&apos;enregistrement.
               </p>
-              <div className="space-y-2">
-                {lignes.map((l) => (
+
+              {lignes.length > 5 && (
+                <div className="relative mb-3">
+                  <Search
+                    size={15}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-onyx-300"
+                  />
+                  <input
+                    type="search"
+                    value={rechercheLigne}
+                    onChange={(e) => setRechercheLigne(e.target.value)}
+                    placeholder="Rechercher un article dans ce conteneur..."
+                    className="w-full rounded-md border border-onyx-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                  />
+                </div>
+              )}
+
+              <div className="max-h-72 space-y-2 overflow-y-auto">
+                {lignes
+                  .filter((l) =>
+                    (l.articles?.designation ?? "")
+                      .toLowerCase()
+                      .includes(rechercheLigne.toLowerCase())
+                  )
+                  .map((l) => (
                   <div key={l.id} className="flex items-center gap-3">
                     <span className="flex-1 text-sm text-onyx-600">
                       {l.articles?.designation}{" "}
