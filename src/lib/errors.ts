@@ -39,6 +39,20 @@ export function logSupabaseError(
     if (error.code === "P0001" && error.message) {
       return error.message;
     }
+    // Violation d'une contrainte de vérification (ex : stock qui
+    // deviendrait négatif) — le message technique brut de PostgreSQL
+    // n'est pas lisible tel quel, mais on en tire au moins le nom de la
+    // contrainte pour donner une piste concrète plutôt qu'un "réessayez"
+    // qui ne dit rien.
+    if (error.code === "23514") {
+      const nomContrainte = error.message.match(/constraint "([^"]+)"/)?.[1];
+      if (nomContrainte === "stock_non_negatif") {
+        return "Cette opération ferait passer un stock en dessous de zéro. Vérifiez les quantités déjà consommées ailleurs (ventes, autres corrections) avant de réessayer.";
+      }
+      return nomContrainte
+        ? `Valeur refusée par une règle de cohérence de la base ("${nomContrainte}"). Vérifiez les valeurs saisies.`
+        : messageUtilisateur;
+    }
   }
 
   return messageUtilisateur;

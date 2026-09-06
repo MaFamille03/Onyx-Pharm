@@ -511,58 +511,57 @@ function InventaireDetail({
         Retour aux inventaires
       </button>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold text-onyx-900 sm:text-2xl">
-            {inventaire.reference}
-            <StatutBadge statut={inventaire.statut} />
-          </h1>
-          <p className="mt-1 text-sm text-onyx-500">
-            Emplacement : {inventaire.emplacements?.nom} · {totalEcarts} écart
-            {totalEcarts !== 1 ? "s" : ""} détecté{totalEcarts !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <SecondaryButton onClick={() => setImpressionOpen(true)}>
-            <Printer size={16} />
-            Exporter en PDF
-          </SecondaryButton>
-          <SecondaryButton
-            onClick={() => setSuppressionOpen(true)}
-            className="border-red-200 text-red-600 hover:bg-red-50"
-          >
-            <Trash2 size={16} />
-            Supprimer
-          </SecondaryButton>
-          {estBrouillon && (
-            <>
-              <SecondaryButton
-                onClick={() => {
-                  setAjoutError(null);
-                  setNouvelArticleId("");
-                  setNouvelleQuantiteReelle("");
-                  setAjoutArticleOuvert(true);
-                }}
-              >
-                <Plus size={16} />
-                Ajouter un article
-              </SecondaryButton>
-              <SecondaryButton
-                onClick={enregistrerComptages}
-                loading={saving}
-                disabled={Object.keys(modifs).length === 0}
-              >
-                Enregistrer les comptages
-              </SecondaryButton>
-              <PrimaryButton onClick={validerInventaire} loading={validating}>
-                <CheckCircle2 size={16} />
-                Valider l&apos;inventaire
-              </PrimaryButton>
-            </>
-          )}
-        </div>
+      <div>
+        <h1 className="flex items-center gap-2 text-xl font-semibold text-onyx-900 sm:text-2xl">
+          {inventaire.reference}
+          <StatutBadge statut={inventaire.statut} />
+        </h1>
+        <p className="mt-1 text-sm text-onyx-500">
+          Emplacement : {inventaire.emplacements?.nom} · {totalEcarts} écart
+          {totalEcarts !== 1 ? "s" : ""} détecté{totalEcarts !== 1 ? "s" : ""}
+        </p>
       </div>
+
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <SecondaryButton onClick={() => setImpressionOpen(true)}>
+          <Printer size={16} />
+          Exporter en PDF
+        </SecondaryButton>
+        <SecondaryButton
+          onClick={() => setSuppressionOpen(true)}
+          className="border-red-200 text-red-600 hover:bg-red-50"
+        >
+          <Trash2 size={16} />
+          Supprimer
+        </SecondaryButton>
+        {estBrouillon && (
+          <>
+            <SecondaryButton
+              onClick={() => {
+                setAjoutError(null);
+                setNouvelArticleId("");
+                setNouvelleQuantiteReelle("");
+                setAjoutArticleOuvert(true);
+              }}
+            >
+              <Plus size={16} />
+              Ajouter un article
+            </SecondaryButton>
+            <SecondaryButton
+              onClick={enregistrerComptages}
+              loading={saving}
+              disabled={Object.keys(modifs).length === 0}
+            >
+              Enregistrer les comptages
+            </SecondaryButton>
+            <PrimaryButton onClick={validerInventaire} loading={validating}>
+              <CheckCircle2 size={16} />
+              Valider l&apos;inventaire
+            </PrimaryButton>
+          </>
+        )}
+      </div>
+
       {estBrouillon && (
         <p className="mt-1 text-xs text-onyx-400">
           &quot;Enregistrer les comptages&quot; sauvegarde ce que vous avez
