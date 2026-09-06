@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Search, History as HistoryIcon } from "lucide-react";
+import { Search, History as HistoryIcon, Undo2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { logSupabaseError } from "@/lib/errors";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
+import { PinModal } from "@/components/securite/PinModal";
 
 type HistoriqueRow = {
   id: string;
@@ -13,6 +15,8 @@ type HistoriqueRow = {
   nouvelle_valeur: unknown;
   description: string | null;
   created_at: string;
+  annule: boolean;
+  donnees_annulation: { type?: string; article_designation?: string } | null;
   profiles: { email: string | null; nom_complet: string | null } | null;
 };
 
@@ -21,6 +25,7 @@ const LABELS_ACTION: Record<string, string> = {
   modification: "Modification",
   validation: "Validation",
   annulation: "Annulation",
+  suppression: "Suppression",
 };
 
 const COULEURS_ACTION: Record<string, string> = {
@@ -28,6 +33,7 @@ const COULEURS_ACTION: Record<string, string> = {
   modification: "bg-accent-50 text-accent-700",
   validation: "bg-blue-50 text-blue-700",
   annulation: "bg-red-50 text-red-700",
+  suppression: "bg-red-50 text-red-700",
 };
 
 function formatValeur(v: unknown): string {
@@ -42,13 +48,14 @@ export function HistoriqueManager() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filtreAction, setFiltreAction] = useState("");
+  const [entreeAnnulation, setEntreeAnnulation] = useState<HistoriqueRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase
       .from("historique")
       .select(
-        "id, action, table_cible, ancienne_valeur, nouvelle_valeur, description, created_at, profiles(email, nom_complet)"
+        "id, action, table_cible, ancienne_valeur, nouvelle_valeur, description, created_at, annule, donnees_annulation, profiles(email, nom_complet)"
       )
       .order("created_at", { ascending: false })
       .limit(200);
@@ -62,6 +69,25 @@ export function HistoriqueManager() {
   }, [load]);
 
   useRealtimeRefresh(["historique"], load);
+
+  async function confirmerAnnulation(pin: string) {
+    if (!entreeAnnulation) return;
+    const { error } = await supabase.rpc("annuler_action_historique", {
+      p_historique_id: entreeAnnulation.id,
+      p_pin: pin,
+    });
+    if (error) {
+      throw new Error(
+        logSupabaseError(
+          { table: "historique", operation: "rpc annuler_action_historique" },
+          error,
+          "Impossible d'annuler cette action."
+        )
+      );
+    }
+    setEntreeAnnulation(null);
+    load();
+  }
 
   const filtres = entries.filter((e) => {
     if (
@@ -82,7 +108,12 @@ export function HistoriqueManager() {
       </h1>
       <p className="mt-1 text-sm text-onyx-500">
         Journal des actions importantes réalisées dans l&apos;application
-        (200 dernières entrées).
+        (200 dernières entrées). Le bouton{" "}
+        <Undo2 size={12} className="inline" /> permet d&apos;annuler une
+        action précise (code PIN requis) lorsque c&apos;est possible sans
+        risque — corrections de quantité en conteneur, en inventaire déjà
+        validé, ou de prix de vente. Les autres actions restent
+        consultables mais ne peuvent pas être annulées automatiquement.
       </p>
 
       <div className="mt-5 flex flex-col gap-2.5 sm:flex-row sm:items-center">
@@ -133,51 +164,84 @@ export function HistoriqueManager() {
           </div>
         ) : (
           <div className="space-y-2">
-            {filtres.map((e) => (
-              <div
-                key={e.id}
-                className="rounded-lg border border-onyx-100 bg-white p-3.5"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        COULEURS_ACTION[e.action] ?? "bg-onyx-100 text-onyx-600"
-                      }`}
-                    >
-                      {LABELS_ACTION[e.action] ?? e.action}
-                    </span>
-                    <span className="text-xs text-onyx-400">
-                      {e.table_cible}
-                    </span>
+            {filtres.map((e) => {
+              const annulable = Boolean(e.donnees_annulation?.type) && !e.annule;
+              return (
+                <div
+                  key={e.id}
+                  className="rounded-lg border border-onyx-100 bg-white p-3.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          COULEURS_ACTION[e.action] ?? "bg-onyx-100 text-onyx-600"
+                        }`}
+                      >
+                        {LABELS_ACTION[e.action] ?? e.action}
+                      </span>
+                      <span className="text-xs text-onyx-400">
+                        {e.table_cible}
+                      </span>
+                      {e.annule && (
+                        <span className="rounded-full bg-onyx-100 px-2 py-0.5 text-xs font-medium text-onyx-500">
+                          Annulée
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="whitespace-nowrap text-xs text-onyx-400">
+                        {new Date(e.created_at).toLocaleString("fr-FR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      {annulable && (
+                        <button
+                          onClick={() => setEntreeAnnulation(e)}
+                          className="flex items-center gap-1 rounded-md border border-onyx-200 px-2 py-1 text-xs font-medium text-onyx-600 hover:bg-onyx-50"
+                        >
+                          <Undo2 size={12} />
+                          Annuler
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <span className="whitespace-nowrap text-xs text-onyx-400">
-                    {new Date(e.created_at).toLocaleString("fr-FR", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-sm text-onyx-700">
-                  {e.profiles?.nom_complet || e.profiles?.email || "Système"}
-                  {e.description ? ` — ${e.description}` : ""}
-                </p>
-                {(e.ancienne_valeur !== null || e.nouvelle_valeur !== null) && (
-                  <p className="mt-1 text-xs text-onyx-400">
-                    {formatValeur(e.ancienne_valeur)} →{" "}
-                    <span className="font-medium text-onyx-600">
-                      {formatValeur(e.nouvelle_valeur)}
-                    </span>
+                  <p className="mt-1.5 text-sm text-onyx-700">
+                    {e.profiles?.nom_complet || e.profiles?.email || "Système"}
+                    {e.description ? ` — ${e.description}` : ""}
                   </p>
-                )}
-              </div>
-            ))}
+                  {e.donnees_annulation?.article_designation && (
+                    <p className="mt-0.5 text-xs font-medium text-onyx-500">
+                      Article concerné : {e.donnees_annulation.article_designation}
+                    </p>
+                  )}
+                  {(e.ancienne_valeur !== null || e.nouvelle_valeur !== null) && (
+                    <p className="mt-1 text-xs text-onyx-400">
+                      {formatValeur(e.ancienne_valeur)} →{" "}
+                      <span className="font-medium text-onyx-600">
+                        {formatValeur(e.nouvelle_valeur)}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {entreeAnnulation && (
+        <PinModal
+          title="Annuler cette action"
+          message={`Annuler : "${entreeAnnulation.description}" ? Les valeurs seront restaurées telles qu'elles étaient avant, et cette annulation sera elle-même journalisée.`}
+          onCancel={() => setEntreeAnnulation(null)}
+          onConfirm={confirmerAnnulation}
+        />
+      )}
     </div>
   );
 }

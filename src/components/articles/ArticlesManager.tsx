@@ -66,6 +66,9 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingValues, setEditingValues] =
     useState<ArticleFormValues>(EMPTY_ARTICLE_FORM);
+  const [stockDisponibleEdition, setStockDisponibleEdition] = useState<
+    number | undefined
+  >(undefined);
   const [pinModalArticle, setPinModalArticle] = useState<ArticleRow | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [ajustement, setAjustement] = useState<{
@@ -129,6 +132,9 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       statut: article.statut,
       observations: article.observations ?? "",
     });
+    setStockDisponibleEdition(
+      article.stocks.reduce((s, ligne) => s + ligne.quantite, 0)
+    );
     setModalOpen(true);
   }
 
@@ -606,6 +612,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       {modalOpen && (
         <ArticleFormModal
           initialValues={editingValues}
+          stockDisponible={stockDisponibleEdition}
           onClose={() => setModalOpen(false)}
           onSaved={() => {
             setModalOpen(false);

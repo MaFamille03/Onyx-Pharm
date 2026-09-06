@@ -45,10 +45,13 @@ export const EMPTY_ARTICLE_FORM: ArticleFormValues = {
 
 export function ArticleFormModal({
   initialValues,
+  stockDisponible,
   onClose,
   onSaved,
 }: {
   initialValues: ArticleFormValues;
+  /** Quantité totale actuellement en stock (lecture seule, informatif). */
+  stockDisponible?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -317,7 +320,7 @@ export function ArticleFormModal({
 
           <FormField
             id="stock-minimum"
-            label="Stock minimum"
+            label="Stock minimum (seuil d'alerte)"
             type="number"
             min="0"
             step="1"
@@ -327,6 +330,20 @@ export function ArticleFormModal({
             }
             placeholder="0"
           />
+          {stockDisponible !== undefined && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Stock disponible
+              </label>
+              <div className="flex h-[46px] items-center rounded-lg border border-onyx-100 bg-onyx-50 px-3.5 text-[15px] text-onyx-500">
+                {stockDisponible}
+              </div>
+              <p className="mt-1 text-xs text-onyx-400">
+                Quantité actuellement en stock (tous emplacements et
+                conteneurs confondus). Se corrige depuis Stock, pas ici.
+              </p>
+            </div>
+          )}
           <FormField
             id="numero-lot"
             label="Numéro de lot"
