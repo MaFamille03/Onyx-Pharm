@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Plus, ArrowLeft, Pencil, Trash2, CreditCard, XCircle, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
@@ -42,9 +43,19 @@ type LigneBrouillon = {
 };
 
 export function VentesManager() {
+  const searchParams = useSearchParams();
   const [vue, setVue] = useState<"liste" | "creation" | "detail">("liste");
   const [venteOuverteId, setVenteOuverteId] = useState<string | null>(null);
   const [venteEditionId, setVenteEditionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ouvrir = searchParams.get("ouvrir");
+    if (ouvrir) {
+      setVenteOuverteId(ouvrir);
+      setVue("detail");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (vue === "creation") {
     return (
@@ -753,7 +764,11 @@ function VenteDetail({
       setError(
         error.message.includes("Stock insuffisant")
           ? error.message
-          : "Impossible de valider cette vente."
+          : logSupabaseError(
+              { table: "ventes", operation: "rpc valider_vente" },
+              error,
+              "Impossible de valider cette vente. Réessayez."
+            )
       );
       return;
     }
@@ -832,7 +847,11 @@ function VenteDetail({
       throw new Error(
         error.message.includes("incorrect")
           ? "Code PIN incorrect."
-          : "Impossible d'annuler cette vente."
+          : logSupabaseError(
+              { table: "ventes", operation: "rpc annuler_vente" },
+              error,
+              "Impossible d'annuler cette vente. Réessayez."
+            )
       );
     }
 

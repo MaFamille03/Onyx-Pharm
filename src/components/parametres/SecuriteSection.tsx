@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Hash } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { logSupabaseError } from "@/lib/errors";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
@@ -53,7 +54,11 @@ export function SecuriteSection() {
       setErrorPin(
         error.message.includes("incorrect")
           ? "Ancien code incorrect."
-          : "Impossible de définir le code."
+          : logSupabaseError(
+              { table: "parametres_generaux", operation: "rpc definir_pin_securite" },
+              error,
+              "Impossible de définir le code. Réessayez."
+            )
       );
       return;
     }

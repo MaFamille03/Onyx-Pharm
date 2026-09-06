@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Package2, Plus, ArrowLeft, Pencil, Trash2, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, CreditCard } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
@@ -59,8 +60,18 @@ type LigneImportee = {
 };
 
 export function ConteneursManager() {
+  const searchParams = useSearchParams();
   const [vue, setVue] = useState<"liste" | "creation" | "detail">("liste");
   const [conteneurOuvertId, setConteneurOuvertId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ouvrir = searchParams.get("ouvrir");
+    if (ouvrir) {
+      setConteneurOuvertId(ouvrir);
+      setVue("detail");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (vue === "creation") {
     return <NouveauConteneur onDone={() => setVue("liste")} />;
@@ -325,7 +336,9 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
         return;
       }
       setLignesImportees(validerLignesImport(brutes));
-    } catch {
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[ONYX PHARM] Erreur lecture fichier import conteneur", e);
       setError("Impossible de lire ce fichier. Utilisez le modèle .xlsx fourni.");
     }
     setFileInputKey((k) => k + 1);

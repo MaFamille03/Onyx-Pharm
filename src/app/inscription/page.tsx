@@ -40,6 +40,8 @@ export default function InscriptionPage() {
     });
 
     if (error) {
+      // eslint-disable-next-line no-console
+      console.error("[ONYX PHARM] Erreur auth (signUp)", error);
       setError(
         error.message === "User already registered"
           ? "Un compte existe déjà avec cette adresse e-mail."

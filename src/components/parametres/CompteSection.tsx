@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, UserX, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { logSupabaseError } from "@/lib/errors";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
@@ -85,7 +86,13 @@ export function CompteSection() {
       .eq("id", user.id);
 
     if (error) {
-      throw new Error("Impossible de désactiver le compte.");
+      throw new Error(
+        logSupabaseError(
+          { table: "profiles", operation: "update (désactivation compte)" },
+          error,
+          "Impossible de désactiver le compte. Réessayez."
+        )
+      );
     }
 
     setModalDesactivation(false);
@@ -115,7 +122,13 @@ export function CompteSection() {
       .eq("id", user.id);
 
     if (error) {
-      throw new Error("Impossible de supprimer ce compte.");
+      throw new Error(
+        logSupabaseError(
+          { table: "profiles", operation: "update (suppression compte)" },
+          error,
+          "Impossible de supprimer ce compte. Réessayez."
+        )
+      );
     }
 
     setModalSuppressionFinal(false);

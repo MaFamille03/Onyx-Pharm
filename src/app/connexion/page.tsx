@@ -37,6 +37,8 @@ function ConnexionForm() {
     });
 
     if (error) {
+      // eslint-disable-next-line no-console
+      console.error("[ONYX PHARM] Erreur auth (signInWithPassword)", error);
       setError(
         error.message === "Invalid login credentials"
           ? "E-mail ou mot de passe incorrect."

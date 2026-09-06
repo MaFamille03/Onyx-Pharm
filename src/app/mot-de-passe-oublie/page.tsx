@@ -27,6 +27,8 @@ export default function MotDePasseOubliePage() {
     setLoading(false);
 
     if (error) {
+      // eslint-disable-next-line no-console
+      console.error("[ONYX PHARM] Erreur auth (resetPasswordForEmail)", error);
       setError("Une erreur est survenue. Réessayez.");
       return;
     }

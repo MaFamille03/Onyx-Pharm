@@ -50,6 +50,8 @@ export default function ReinitialiserMotDePassePage() {
     setLoading(false);
 
     if (error) {
+      // eslint-disable-next-line no-console
+      console.error("[ONYX PHARM] Erreur auth (updateUser)", error);
       setError("Impossible de mettre à jour le mot de passe. Réessayez.");
       return;
     }

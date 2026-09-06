@@ -157,7 +157,9 @@ export function ImportExportManager() {
         return;
       }
       setLignes(validerLignes(brutes));
-    } catch {
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[ONYX PHARM] Erreur lecture fichier import articles", e);
       setErreurGenerale("Impossible de lire ce fichier. Utilisez le modèle .xlsx fourni.");
     }
   }
