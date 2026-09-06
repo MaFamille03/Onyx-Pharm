@@ -10,6 +10,7 @@ import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner, StatutBadge } from "@/components/ui/Badges";
 import { PinModal } from "@/components/securite/PinModal";
 import { InventairePrintable } from "@/components/inventaires/InventairePrintable";
+import { ArticleSelect } from "@/components/articles/ArticleSelect";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
 
@@ -19,6 +20,7 @@ type InventaireRow = {
   statut: string;
   created_at: string;
   date_inventaire: string;
+  emplacement_id: string;
   emplacements: { nom: string } | null;
 };
 
@@ -53,7 +55,7 @@ export function InventairesManager({ embarque }: { embarque?: boolean } = {}) {
     setLoading(true);
     const { data } = await supabase
       .from("inventaires")
-      .select("id, reference, statut, created_at, date_inventaire, emplacements(nom)")
+      .select("id, reference, statut, created_at, date_inventaire, emplacement_id, emplacements(nom)")
       .order("created_at", { ascending: false });
     if (data) setInventaires(data as unknown as InventaireRow[]);
     setLoading(false);
@@ -104,7 +106,7 @@ export function InventairesManager({ embarque }: { embarque?: boolean } = {}) {
         statut: "Brouillon",
         created_by: user?.id ?? null,
       })
-      .select("id, reference, statut, created_at, date_inventaire, emplacements(nom)")
+      .select("id, reference, statut, created_at, date_inventaire, emplacement_id, emplacements(nom)")
       .single();
 
     if (invError || !inventaire) {
@@ -317,6 +319,11 @@ function InventaireDetail({
   const [modifs, setModifs] = useState<Record<string, string>>({});
   const [suppressionOpen, setSuppressionOpen] = useState(false);
   const [impressionOpen, setImpressionOpen] = useState(false);
+  const [ajoutArticleOuvert, setAjoutArticleOuvert] = useState(false);
+  const [nouvelArticleId, setNouvelArticleId] = useState("");
+  const [nouvelleQuantiteReelle, setNouvelleQuantiteReelle] = useState("");
+  const [ajoutError, setAjoutError] = useState<string | null>(null);
+  const [ajoutSaving, setAjoutSaving] = useState(false);
   const [correctionLigne, setCorrectionLigne] = useState<{
     id: string;
     quantite_reelle: number;
@@ -356,6 +363,61 @@ function InventaireDetail({
     }
     setModifs({});
     setSaving(false);
+    load();
+  }
+
+  async function confirmerAjoutArticle(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nouvelArticleId) {
+      setAjoutError("Choisissez un article.");
+      return;
+    }
+    const qte = Number(nouvelleQuantiteReelle);
+    if (Number.isNaN(qte) || qte < 0) {
+      setAjoutError("Quantité invalide.");
+      return;
+    }
+    if (lignes.some((l) => l.article_id === nouvelArticleId)) {
+      setAjoutError("Cet article est déjà dans cet inventaire.");
+      return;
+    }
+
+    setAjoutSaving(true);
+    setAjoutError(null);
+
+    // La quantité théorique reprend le stock actuellement enregistré
+    // pour cet article dans cet emplacement (0 s'il n'y en avait pas
+    // encore — l'article vient peut-être d'y arriver physiquement,
+    // avant même qu'un mouvement de stock ne l'y ait enregistré).
+    const { data: stockActuel } = await supabase
+      .from("stocks")
+      .select("quantite")
+      .eq("article_id", nouvelArticleId)
+      .eq("emplacement_id", inventaire.emplacement_id);
+    const theorique = (stockActuel ?? []).reduce((s, l) => s + l.quantite, 0);
+
+    const { error } = await supabase.from("inventaire_lignes").insert({
+      inventaire_id: inventaire.id,
+      article_id: nouvelArticleId,
+      quantite_theorique: theorique,
+      quantite_reelle: qte,
+    });
+
+    setAjoutSaving(false);
+    if (error) {
+      setAjoutError(
+        logSupabaseError(
+          { table: "inventaire_lignes", operation: "insert (ajout manuel)" },
+          error,
+          "Impossible d'ajouter cet article."
+        )
+      );
+      return;
+    }
+
+    setAjoutArticleOuvert(false);
+    setNouvelArticleId("");
+    setNouvelleQuantiteReelle("");
     load();
   }
 
@@ -461,7 +523,7 @@ function InventaireDetail({
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <SecondaryButton onClick={() => setImpressionOpen(true)}>
             <Printer size={16} />
             Exporter en PDF
@@ -475,6 +537,17 @@ function InventaireDetail({
           </SecondaryButton>
           {estBrouillon && (
             <>
+              <SecondaryButton
+                onClick={() => {
+                  setAjoutError(null);
+                  setNouvelArticleId("");
+                  setNouvelleQuantiteReelle("");
+                  setAjoutArticleOuvert(true);
+                }}
+              >
+                <Plus size={16} />
+                Ajouter un article
+              </SecondaryButton>
               <SecondaryButton
                 onClick={enregistrerComptages}
                 loading={saving}
@@ -490,6 +563,15 @@ function InventaireDetail({
           )}
         </div>
       </div>
+      {estBrouillon && (
+        <p className="mt-1 text-xs text-onyx-400">
+          &quot;Enregistrer les comptages&quot; sauvegarde ce que vous avez
+          saisi sans clôturer l&apos;inventaire ni toucher au stock — utile
+          pour reprendre plus tard. &quot;Valider l&apos;inventaire&quot;
+          enregistre aussi vos comptages, puis corrige définitivement le
+          stock selon les écarts constatés.
+        </p>
+      )}
 
       {error && (
         <div className="mt-3">
@@ -621,6 +703,47 @@ function InventaireDetail({
           onCancel={() => setSuppressionOpen(false)}
           onConfirm={confirmerSuppression}
         />
+      )}
+
+      {ajoutArticleOuvert && (
+        <Modal title="Ajouter un article à l'inventaire" onClose={() => setAjoutArticleOuvert(false)}>
+          <form onSubmit={confirmerAjoutArticle} className="space-y-4">
+            {ajoutError && <InlineBanner message={ajoutError} />}
+            <ArticleSelect value={nouvelArticleId} onChange={setNouvelArticleId} />
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Quantité comptée
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                required
+                value={nouvelleQuantiteReelle}
+                onChange={(e) => setNouvelleQuantiteReelle(e.target.value)}
+                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+              />
+              <p className="mt-1 text-xs text-onyx-400">
+                La quantité théorique reprend automatiquement ce qui est
+                déjà enregistré pour cet article dans cet emplacement
+                (souvent 0, si l&apos;article vient d&apos;y arriver
+                physiquement).
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <SecondaryButton
+                type="button"
+                onClick={() => setAjoutArticleOuvert(false)}
+                className="flex-1"
+              >
+                Annuler
+              </SecondaryButton>
+              <PrimaryButton type="submit" loading={ajoutSaving} className="flex-1">
+                Ajouter
+              </PrimaryButton>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {correctionLigne && (

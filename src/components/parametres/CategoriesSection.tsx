@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, ChevronDown, Tag } from "lucide-react";
+import { Plus, ChevronDown, Tag, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { FormField } from "@/components/auth/FormField";
@@ -132,6 +132,48 @@ export function CategoriesSection() {
     load();
   }
 
+  async function supprimerCategorie(item: Categorie) {
+    if (!confirm(`Supprimer définitivement "${item.nom}" et ses sous-catégories ?`))
+      return;
+    setError(null);
+    const { error } = await supabase.from("categories").delete().eq("id", item.id);
+    if (error) {
+      setError(
+        error.code === "23503"
+          ? `"${item.nom}" est utilisée par des articles et ne peut pas être supprimée — désactivez-la plutôt.`
+          : logSupabaseError(
+              { table: "categories", operation: "delete" },
+              error,
+              "Impossible de supprimer cette catégorie. Réessayez."
+            )
+      );
+      return;
+    }
+    load();
+  }
+
+  async function supprimerSousCategorie(item: SousCategorie) {
+    if (!confirm(`Supprimer définitivement "${item.nom}" ?`)) return;
+    setError(null);
+    const { error } = await supabase
+      .from("sous_categories")
+      .delete()
+      .eq("id", item.id);
+    if (error) {
+      setError(
+        error.code === "23503"
+          ? `"${item.nom}" est utilisée par des articles et ne peut pas être supprimée — désactivez-la plutôt.`
+          : logSupabaseError(
+              { table: "sous_categories", operation: "delete" },
+              error,
+              "Impossible de supprimer cette sous-catégorie. Réessayez."
+            )
+      );
+      return;
+    }
+    load();
+  }
+
   return (
     <div>
       <p className="text-sm text-onyx-500">
@@ -210,7 +252,7 @@ export function CategoriesSection() {
 
                 {isOpen && (
                   <div className="border-t border-onyx-100 bg-onyx-50/40 px-4 py-3">
-                    <div className="mb-2 flex justify-end">
+                    <div className="mb-2 flex justify-end gap-1.5">
                       <SecondaryButton
                         onClick={() => toggleCategorieActif(cat)}
                         className="min-h-0 px-3 py-1.5 text-xs"
@@ -219,6 +261,13 @@ export function CategoriesSection() {
                           ? "Désactiver la catégorie"
                           : "Réactiver la catégorie"}
                       </SecondaryButton>
+                      <button
+                        onClick={() => supprimerCategorie(cat)}
+                        className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Supprimer la catégorie"
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
 
                     <div className="space-y-1.5">
@@ -241,12 +290,21 @@ export function CategoriesSection() {
                           >
                             {sc.nom}
                           </span>
-                          <button
-                            onClick={() => toggleSousCategorieActif(sc)}
-                            className="text-xs font-medium text-accent-600 hover:text-accent-700"
-                          >
-                            {sc.actif ? "Désactiver" : "Réactiver"}
-                          </button>
+                          <span className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleSousCategorieActif(sc)}
+                              className="text-xs font-medium text-accent-600 hover:text-accent-700"
+                            >
+                              {sc.actif ? "Désactiver" : "Réactiver"}
+                            </button>
+                            <button
+                              onClick={() => supprimerSousCategorie(sc)}
+                              className="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
+                              aria-label="Supprimer"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </span>
                         </div>
                       ))}
                     </div>

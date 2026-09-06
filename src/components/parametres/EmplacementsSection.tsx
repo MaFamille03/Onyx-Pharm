@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, MapPin } from "lucide-react";
+import { Plus, MapPin, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { FormField } from "@/components/auth/FormField";
@@ -81,6 +81,25 @@ export function EmplacementsSection() {
     load();
   }
 
+  async function supprimer(item: Emplacement) {
+    if (!confirm(`Supprimer définitivement "${item.nom}" ?`)) return;
+    setError(null);
+    const { error } = await supabase.from("emplacements").delete().eq("id", item.id);
+    if (error) {
+      setError(
+        error.code === "23503"
+          ? `"${item.nom}" est utilisé (stock, mouvements, inventaires...) et ne peut pas être supprimé — désactivez-le plutôt.`
+          : logSupabaseError(
+              { table: "emplacements", operation: "delete" },
+              error,
+              "Impossible de supprimer cet emplacement. Réessayez."
+            )
+      );
+      return;
+    }
+    load();
+  }
+
   return (
     <div>
       <p className="text-sm text-onyx-500">
@@ -131,12 +150,21 @@ export function EmplacementsSection() {
                   {item.nom}
                 </span>
               </div>
-              <SecondaryButton
-                onClick={() => toggleActif(item)}
-                className="min-h-0 px-3 py-1.5 text-xs"
-              >
-                {item.actif ? "Désactiver" : "Réactiver"}
-              </SecondaryButton>
+              <div className="flex items-center gap-1">
+                <SecondaryButton
+                  onClick={() => toggleActif(item)}
+                  className="min-h-0 px-3 py-1.5 text-xs"
+                >
+                  {item.actif ? "Désactiver" : "Réactiver"}
+                </SecondaryButton>
+                <button
+                  onClick={() => supprimer(item)}
+                  className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                  aria-label="Supprimer"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             </div>
           ))
         )}
