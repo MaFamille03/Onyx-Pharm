@@ -41,7 +41,7 @@ export function TableauDeBordManager({
   nomUtilisateur: string | null;
 }) {
   const supabase = createClient();
-  const [periode, setPeriode] = useState<Periode>("mois");
+  const [periode, setPeriode] = useState<Periode>("tout");
   const [loading, setLoading] = useState(true);
 
   const [chiffreAffaires, setChiffreAffaires] = useState(0);

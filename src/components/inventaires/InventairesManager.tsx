@@ -130,31 +130,41 @@ export function InventairesManager({ embarque }: { embarque?: boolean } = {}) {
           id: string;
           stocks: { emplacement_id: string; quantite: number }[];
         }[]
-      ).map((a) => {
-        const theorique = a.stocks
-          .filter((s) => s.emplacement_id === emplacementId)
-          .reduce((sum, s) => sum + s.quantite, 0);
-        return {
-          inventaire_id: inventaire.id,
-          article_id: a.id,
-          quantite_theorique: theorique,
-          quantite_reelle: theorique,
-        };
-      });
-      const { error: lignesError } = await supabase
-        .from("inventaire_lignes")
-        .insert(lignes);
+      )
+        .map((a) => {
+          const theorique = a.stocks
+            .filter((s) => s.emplacement_id === emplacementId)
+            .reduce((sum, s) => sum + s.quantite, 0);
+          return {
+            inventaire_id: inventaire.id,
+            article_id: a.id,
+            quantite_theorique: theorique,
+            quantite_reelle: theorique,
+          };
+        })
+        // Seuls les articles déjà présents dans cet emplacement sont
+        // proposés au comptage — pour ne pas mélanger tout le
+        // catalogue avec ce qui est réellement sur place. Un article
+        // nouvellement arrivé doit d'abord y être placé par un
+        // mouvement de stock (Stock > bouton Mouvements).
+        .filter((l) => l.quantite_theorique > 0);
 
-      if (lignesError) {
-        setCreating(false);
-        setError(
-          logSupabaseError(
-            { table: "inventaire_lignes", operation: "insert" },
-            lignesError,
-            "L'inventaire a été créé mais ses lignes n'ont pas pu être générées. Réessayez."
-          )
-        );
-        return;
+      if (lignes.length > 0) {
+        const { error: lignesError } = await supabase
+          .from("inventaire_lignes")
+          .insert(lignes);
+
+        if (lignesError) {
+          setCreating(false);
+          setError(
+            logSupabaseError(
+              { table: "inventaire_lignes", operation: "insert" },
+              lignesError,
+              "L'inventaire a été créé mais ses lignes n'ont pas pu être générées. Réessayez."
+            )
+          );
+          return;
+        }
       }
     }
 

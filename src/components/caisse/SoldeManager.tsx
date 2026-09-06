@@ -231,17 +231,30 @@ export function SoldeManager() {
 
   async function exporter() {
     let cumul = periode === "tout" ? soldeInitial : 0;
-    const rows = lignes.map((l, i) => {
-      cumul += l.recette - l.depense;
-      return {
-        Numéro: i + 1,
-        Date: new Date(l.date_operation).toLocaleDateString("fr-FR"),
-        Désignation: l.description || l.reference,
-        Recette: l.recette || "",
-        Dépense: l.depense || "",
-        "Solde cumulatif": cumul,
-      };
-    });
+    const rows: Record<string, unknown>[] = [];
+    if (periode === "tout") {
+      rows.push({
+        Numéro: "",
+        Date: "",
+        Désignation: "Solde initial",
+        Recette: "",
+        Dépense: "",
+        "Solde cumulatif": soldeInitial,
+      });
+    }
+    rows.push(
+      ...lignes.map((l, i) => {
+        cumul += l.recette - l.depense;
+        return {
+          Numéro: i + 1,
+          Date: new Date(l.date_operation).toLocaleDateString("fr-FR"),
+          Désignation: l.description || l.reference,
+          Recette: l.recette || "",
+          Dépense: l.depense || "",
+          "Solde cumulatif": cumul,
+        };
+      })
+    );
     const totalRecettes = lignes.reduce((s, l) => s + l.recette, 0);
     const totalDepenses = lignes.reduce((s, l) => s + l.depense, 0);
     rows.push({
@@ -386,36 +399,60 @@ export function SoldeManager() {
                 </tr>
               </thead>
               <tbody>
-                {lignes.length === 0 ? (
+                {lignes.length === 0 && periode !== "tout" ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-onyx-400">
                       Aucune opération sur la période.
                     </td>
                   </tr>
                 ) : (
-                  lignes.map((l, i) => {
-                    cumulAffiche += l.recette - l.depense;
-                    return (
-                      <tr key={l.id} className="border-b border-onyx-50 last:border-0">
-                        <td className="px-4 py-2.5 text-onyx-400">{i + 1}</td>
-                        <td className="px-4 py-2.5 text-onyx-500">
-                          {new Date(l.date_operation).toLocaleDateString("fr-FR")}
+                  <>
+                    {periode === "tout" && (
+                      <tr className="border-b border-onyx-100 bg-onyx-50/50">
+                        <td className="px-4 py-2.5 text-onyx-400">—</td>
+                        <td className="px-4 py-2.5 text-onyx-500">—</td>
+                        <td className="px-4 py-2.5 font-medium text-onyx-800">
+                          Solde initial
                         </td>
-                        <td className="px-4 py-2.5 text-onyx-700">
-                          {l.description || l.reference}
-                        </td>
-                        <td className="px-4 py-2.5 text-right text-emerald-600">
-                          {l.recette ? l.recette.toLocaleString("fr-FR") : ""}
-                        </td>
-                        <td className="px-4 py-2.5 text-right text-red-500">
-                          {l.depense ? l.depense.toLocaleString("fr-FR") : ""}
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-medium text-onyx-800">
-                          {cumulAffiche.toLocaleString("fr-FR")}
+                        <td className="px-4 py-2.5 text-right text-onyx-400">—</td>
+                        <td className="px-4 py-2.5 text-right text-onyx-400">—</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-onyx-900">
+                          {soldeInitial.toLocaleString("fr-FR")}
                         </td>
                       </tr>
-                    );
-                  })
+                    )}
+                    {lignes.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-6 text-center text-onyx-400">
+                          Aucune opération enregistrée depuis le solde initial.
+                        </td>
+                      </tr>
+                    ) : (
+                      lignes.map((l, i) => {
+                        cumulAffiche += l.recette - l.depense;
+                        return (
+                          <tr key={l.id} className="border-b border-onyx-50 last:border-0">
+                            <td className="px-4 py-2.5 text-onyx-400">{i + 1}</td>
+                            <td className="px-4 py-2.5 text-onyx-500">
+                              {new Date(l.date_operation).toLocaleDateString("fr-FR")}
+                            </td>
+                            <td className="px-4 py-2.5 text-onyx-700">
+                              {l.description || l.reference}
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-emerald-600">
+                              {l.recette ? l.recette.toLocaleString("fr-FR") : ""}
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-red-500">
+                              {l.depense ? l.depense.toLocaleString("fr-FR") : ""}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-medium text-onyx-800">
+                              {cumulAffiche.toLocaleString("fr-FR")}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </>
                 )}
               </tbody>
             </table>

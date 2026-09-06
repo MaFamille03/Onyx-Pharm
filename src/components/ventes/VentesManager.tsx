@@ -30,6 +30,7 @@ type ArticleOption = {
   id: string;
   designation: string;
   prix_vente_conseille: number;
+  stocks: { emplacement_id: string; quantite: number }[];
 };
 
 type LigneBrouillon = {
@@ -224,7 +225,7 @@ function NouvelleVente({
   useEffect(() => {
     supabase
       .from("articles")
-      .select("id, designation, prix_vente_conseille")
+      .select("id, designation, prix_vente_conseille, stocks(emplacement_id, quantite)")
       .eq("statut", "Actif")
       .order("designation")
       .then(({ data }) => {
@@ -295,13 +296,34 @@ function NouvelleVente({
 
   function choisirArticle(index: number, articleId: string) {
     const article = articlesOptions.find((a) => a.id === articleId);
+
+    // Un seul emplacement a du stock pour cet article → on le
+    // pré-remplit automatiquement. S'il y en a plusieurs (ou aucun), on
+    // laisse le choix ouvert plutôt que d'en imposer un.
+    let emplacementPropose = "";
+    if (article) {
+      const emplacementsAvecStock = article.stocks.filter((s) => s.quantite > 0);
+      if (emplacementsAvecStock.length === 1) {
+        emplacementPropose = emplacementsAvecStock[0].emplacement_id;
+      }
+    }
+
     majLigne(index, {
       article_id: articleId,
       prix_vente_conseille_reference: article
         ? String(article.prix_vente_conseille)
         : "",
       prix_vente_reel: article ? String(article.prix_vente_conseille) : "",
+      emplacement_id: emplacementPropose,
     });
+  }
+
+  function quantiteDisponible(articleId: string, emplacementId: string): number {
+    const article = articlesOptions.find((a) => a.id === articleId);
+    if (!article) return 0;
+    return article.stocks
+      .filter((s) => s.emplacement_id === emplacementId)
+      .reduce((s, l) => s + l.quantite, 0);
   }
 
   function designationDe(articleId: string) {
@@ -614,12 +636,32 @@ function NouvelleVente({
                           required
                           className="w-full rounded-md border border-onyx-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
                         >
-                          {emplacementsActifs.map((e) => (
-                            <option key={e.id} value={e.id}>
-                              {e.nom}
-                            </option>
-                          ))}
+                          <option value="">— Choisir —</option>
+                          {emplacementsActifs.map((e) => {
+                            const qte = l.article_id
+                              ? quantiteDisponible(l.article_id, e.id)
+                              : 0;
+                            return (
+                              <option key={e.id} value={e.id}>
+                                {e.nom}
+                                {l.article_id ? ` (${qte} disponible${qte > 1 ? "s" : ""})` : ""}
+                              </option>
+                            );
+                          })}
                         </select>
+                        {l.article_id && l.emplacement_id && (
+                          <p
+                            className={`mt-0.5 text-[11px] ${
+                              quantiteDisponible(l.article_id, l.emplacement_id) <
+                              (Number(l.quantite) || 0)
+                                ? "font-medium text-red-500"
+                                : "text-onyx-400"
+                            }`}
+                          >
+                            Disponible ici :{" "}
+                            {quantiteDisponible(l.article_id, l.emplacement_id)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-end sm:col-span-1">
@@ -707,6 +749,9 @@ function VenteDetail({
   const [paiementModalOpen, setPaiementModalOpen] = useState(false);
   const [montantPaiement, setMontantPaiement] = useState("");
   const [modePaiement, setModePaiement] = useState("Espèces");
+  const [datePaiementVente, setDatePaiementVente] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
   const [annulationModalOpen, setAnnulationModalOpen] = useState(false);
   const [impressionOpen, setImpressionOpen] = useState(false);
   const [suppressionBrouillonOpen, setSuppressionBrouillonOpen] = useState(false);
@@ -885,6 +930,7 @@ function VenteDetail({
       vente_id: venteId,
       montant,
       mode_paiement: modePaiement,
+      date_paiement: datePaiementVente,
       created_by: user?.id ?? null,
     });
 
@@ -984,6 +1030,7 @@ function VenteDetail({
             <PrimaryButton
               onClick={() => {
                 setMontantPaiement(String(reste));
+                setDatePaiementVente(new Date().toISOString().slice(0, 10));
                 setError(null);
                 setPaiementModalOpen(true);
               }}
@@ -1131,6 +1178,18 @@ function VenteDetail({
               <option value="Mobile Money">Mobile Money</option>
               <option value="Autre">Autre</option>
             </SelectField>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Date du paiement
+              </label>
+              <input
+                type="date"
+                required
+                value={datePaiementVente}
+                onChange={(e) => setDatePaiementVente(e.target.value)}
+                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+              />
+            </div>
             <div className="flex gap-3 pt-2">
               <SecondaryButton
                 type="button"

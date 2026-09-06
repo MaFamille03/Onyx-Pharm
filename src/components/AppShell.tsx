@@ -20,13 +20,13 @@ export function AppShell({
   const [vue, setVue] = useState(presentationVue);
 
   return (
-    <div className="flex min-h-screen bg-[var(--background)]">
+    <div className="flex h-screen overflow-hidden bg-[var(--background)]">
       <Sidebar />
       <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar userEmail={userEmail} onOpenMenu={() => setDrawerOpen(true)} />
-        <main className="flex-1 pb-20 lg:pb-0">
+        <main className="flex-1 overflow-y-auto pb-20 lg:pb-0">
           <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
             {children}
           </div>
