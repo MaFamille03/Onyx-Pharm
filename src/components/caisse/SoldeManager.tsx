@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
-import { exporterExcel } from "@/lib/excel";
+import { exporterExcelMisEnForme } from "@/lib/excel";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
 import { Modal } from "@/components/ui/Modal";
 import { SelectField } from "@/components/ui/FormControls";
@@ -146,8 +146,10 @@ export function SoldeManager() {
     setError(null);
     const { error } = await supabase
       .from("parametres_generaux")
-      .update({ valeur: String(val) })
-      .eq("cle", "solde_caisse_initial");
+      .upsert(
+        { cle: "solde_caisse_initial", valeur: String(val) },
+        { onConflict: "cle" }
+      );
     setSaving(false);
     if (error) {
       setError(
@@ -227,7 +229,7 @@ export function SoldeManager() {
     load();
   }
 
-  function exporter() {
+  async function exporter() {
     let cumul = periode === "tout" ? soldeInitial : 0;
     const rows = lignes.map((l, i) => {
       cumul += l.recette - l.depense;
@@ -240,7 +242,22 @@ export function SoldeManager() {
         "Solde cumulatif": cumul,
       };
     });
-    exporterExcel("livre-de-caisse", [{ nom: "Livre de caisse", lignes: rows }]);
+    const totalRecettes = lignes.reduce((s, l) => s + l.recette, 0);
+    const totalDepenses = lignes.reduce((s, l) => s + l.depense, 0);
+    rows.push({
+      Numéro: "" as unknown as number,
+      Date: "",
+      Désignation: "TOTAL",
+      Recette: totalRecettes,
+      Dépense: totalDepenses,
+      "Solde cumulatif": cumul,
+    });
+    await exporterExcelMisEnForme(
+      "Livre_De_Caisse_Onyx_Pharm",
+      "Livre de caisse",
+      ["Numéro", "Date", "Désignation", "Recette", "Dépense", "Solde cumulatif"],
+      rows
+    );
   }
 
   const totalEncaissements = lignes.reduce((s, l) => s + l.recette, 0);

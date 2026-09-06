@@ -86,6 +86,13 @@ export function PaiementsVentesManager() {
         }))
       );
     }
+    if (paiementsRes.error) {
+      logSupabaseError(
+        { table: "paiements_ventes", operation: "select" },
+        paiementsRes.error,
+        ""
+      );
+    }
     if (paiementsRes.data)
       setPaiements(paiementsRes.data as unknown as PaiementRow[]);
     setLoading(false);

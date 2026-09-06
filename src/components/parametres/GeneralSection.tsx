@@ -58,8 +58,10 @@ export function GeneralSection() {
     setError(null);
     const { error } = await supabase
       .from("parametres_generaux")
-      .update({ valeur: dateConception })
-      .eq("cle", "date_conception_site");
+      .upsert(
+        { cle: "date_conception_site", valeur: dateConception },
+        { onConflict: "cle" }
+      );
     setSaving(false);
     if (error) {
       setError(
@@ -114,7 +116,7 @@ export function GeneralSection() {
             <Calendar size={16} />
           </div>
           <h3 className="text-sm font-semibold text-onyx-800">
-            Date de conception du site
+            Date de début d&apos;utilisation
           </h3>
         </div>
         <p className="mt-1.5 text-xs text-onyx-400">

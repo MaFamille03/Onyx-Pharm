@@ -45,6 +45,7 @@ export function PaiementsConteneursManager() {
   const [editPaiement, setEditPaiement] = useState<PaiementRow | null>(null);
   const [editMontant, setEditMontant] = useState("");
   const [editMode, setEditMode] = useState("Espèces");
+  const [editDate, setEditDate] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [deletePaiement, setDeletePaiement] = useState<PaiementRow | null>(null);
@@ -143,6 +144,7 @@ export function PaiementsConteneursManager() {
     setEditPaiement(p);
     setEditMontant(String(p.montant));
     setEditMode(p.mode_paiement);
+    setEditDate(p.date_paiement);
     setEditError(null);
   }
 
@@ -158,7 +160,7 @@ export function PaiementsConteneursManager() {
     setEditError(null);
     const { error } = await supabase
       .from("paiements_conteneurs")
-      .update({ montant: val, mode_paiement: editMode })
+      .update({ montant: val, mode_paiement: editMode, date_paiement: editDate })
       .eq("id", editPaiement.id);
     setEditSaving(false);
     if (error) {
@@ -368,6 +370,18 @@ export function PaiementsConteneursManager() {
               <option value="Mobile Money">Mobile Money</option>
               <option value="Autre">Autre</option>
             </SelectField>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Date du paiement
+              </label>
+              <input
+                type="date"
+                required
+                value={editDate}
+                onChange={(e) => setEditDate(e.target.value)}
+                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+              />
+            </div>
             <div className="flex gap-3 pt-2">
               <SecondaryButton
                 type="button"

@@ -51,7 +51,7 @@ function SidebarFooter() {
   return (
     <div className="border-t border-onyx-100 px-4 py-3">
       <p className="text-[11px] text-onyx-300">
-        Site conçu le{" "}
+        En utilisation depuis le{" "}
         {new Date(date).toLocaleDateString("fr-FR", {
           day: "numeric",
           month: "long",

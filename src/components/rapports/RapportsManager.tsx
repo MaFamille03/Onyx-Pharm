@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { Download, Package, ShoppingCart, Truck, Wallet, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { exporterExcel, exporterExcelMisEnForme } from "@/lib/excel";
+import { logSupabaseError } from "@/lib/errors";
+import { exporterExcelMisEnForme, exporterExcelMisEnFormeMultiFeuilles } from "@/lib/excel";
 import { PrimaryButton } from "@/components/ui/Buttons";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 
@@ -48,7 +49,7 @@ const MOIS_LABELS = [
 
 export function RapportsManager() {
   const [tab, setTab] = useState<TabId>("stock");
-  const [periode, setPeriode] = useState<Periode>("mois");
+  const [periode, setPeriode] = useState<Periode>("tout");
   const [moisPrecis, setMoisPrecis] = useState("");
   const [anneePrecise, setAnneePrecise] = useState("");
 
@@ -242,6 +243,13 @@ function RapportStock() {
       row["Stock minimum"] = l.stockMinimum;
       return row;
     });
+    const ligneTotal: Record<string, unknown> = { Désignation: "TOTAL", Catégorie: "" };
+    for (const e of emplacementsActifs) {
+      ligneTotal[e.nom] = lignes.reduce((s, l) => s + (l.parEmplacement[e.id] ?? 0), 0);
+    }
+    ligneTotal["Total"] = lignes.reduce((s, l) => s + l.total, 0);
+    ligneTotal["Stock minimum"] = "";
+    lignesExport.push(ligneTotal);
     await exporterExcelMisEnForme(
       "Rapport_Stock_Onyx_Pharm",
       "Stock",
@@ -317,7 +325,8 @@ function RapportVentes({ periode }: { periode: PeriodeFiltre }) {
     const { debut, fin } = resolvePeriode(periode);
     if (debut) query = query.gte("date_vente", debut);
     if (fin) query = query.lt("date_vente", fin);
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) logSupabaseError({ table: "ventes", operation: "select (rapport)" }, error, "");
     if (data) setLignes(data as unknown as typeof lignes);
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -330,18 +339,20 @@ function RapportVentes({ periode }: { periode: PeriodeFiltre }) {
   const total = lignes.reduce((s, l) => s + l.montant_total, 0);
 
   function exporter() {
-    exporterExcel("rapport-ventes", [
-      {
-        nom: "Ventes",
-        lignes: lignes.map((l) => ({
-          Référence: l.reference,
-          Date: l.date_vente,
-          Client: l.clients?.nom ?? "",
-          Montant: l.montant_total,
-          Statut: l.statut,
-        })),
-      },
-    ]);
+    const rows = lignes.map((l) => ({
+      Référence: l.reference,
+      Date: l.date_vente,
+      Client: l.clients?.nom ?? "",
+      Montant: l.montant_total,
+      Statut: l.statut,
+    }));
+    rows.push({ Référence: "TOTAL", Date: "", Client: "", Montant: total, Statut: "" });
+    exporterExcelMisEnForme(
+      "Rapport_Ventes_Onyx_Pharm",
+      "Ventes",
+      ["Référence", "Date", "Client", "Montant", "Statut"],
+      rows
+    );
   }
 
   return (
@@ -411,7 +422,8 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
     const { debut, fin } = resolvePeriode(periode);
     if (debut) query = query.gte("date_arrivee", debut);
     if (fin) query = query.lt("date_arrivee", fin);
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) logSupabaseError({ table: "conteneurs", operation: "select (rapport)" }, error, "");
     if (data) setLignes(data as unknown as typeof lignes);
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,18 +436,20 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
   const total = lignes.reduce((s, l) => s + (l.montant_achat_global ?? 0), 0);
 
   function exporter() {
-    exporterExcel("rapport-conteneurs", [
-      {
-        nom: "Conteneurs",
-        lignes: lignes.map((l) => ({
-          Code: l.code,
-          Date: l.date_arrivee,
-          Fournisseur: l.fournisseurs?.nom ?? "",
-          "Montant d'achat": l.montant_achat_global ?? "",
-          Statut: l.statut,
-        })),
-      },
-    ]);
+    const rows = lignes.map((l) => ({
+      Code: l.code,
+      Date: l.date_arrivee,
+      Fournisseur: l.fournisseurs?.nom ?? "",
+      "Montant d'achat": l.montant_achat_global ?? "",
+      Statut: l.statut,
+    }));
+    rows.push({ Code: "TOTAL", Date: "", Fournisseur: "", "Montant d'achat": total, Statut: "" });
+    exporterExcelMisEnForme(
+      "Rapport_Conteneurs_Onyx_Pharm",
+      "Conteneurs",
+      ["Code", "Date", "Fournisseur", "Montant d'achat", "Statut"],
+      rows
+    );
   }
 
   return (
@@ -537,27 +551,28 @@ function RapportCaisse({ periode }: { periode: PeriodeFiltre }) {
   const totalDec = decaissements.reduce((s, d) => s + d.montant, 0);
 
   function exporter() {
-    exporterExcel("rapport-caisse", [
-      {
-        nom: "Encaissements",
-        lignes: encaissements.map((e) => ({
-          Référence: e.reference,
-          Date: e.date_operation,
-          Catégorie: e.categorie ?? "",
-          Description: e.description ?? "",
-          Montant: e.montant,
-        })),
-      },
-      {
-        nom: "Décaissements",
-        lignes: decaissements.map((d) => ({
-          Référence: d.reference,
-          Date: d.date_operation,
-          Catégorie: d.categorie ?? "",
-          Description: d.description ?? "",
-          Montant: d.montant,
-        })),
-      },
+    const lignesEnc = encaissements.map((e) => ({
+      Référence: e.reference,
+      Date: e.date_operation,
+      Catégorie: e.categorie ?? "",
+      Description: e.description ?? "",
+      Montant: e.montant,
+    }));
+    lignesEnc.push({ Référence: "TOTAL", Date: "", Catégorie: "", Description: "", Montant: totalEnc });
+
+    const lignesDec = decaissements.map((d) => ({
+      Référence: d.reference,
+      Date: d.date_operation,
+      Catégorie: d.categorie ?? "",
+      Description: d.description ?? "",
+      Montant: d.montant,
+    }));
+    lignesDec.push({ Référence: "TOTAL", Date: "", Catégorie: "", Description: "", Montant: totalDec });
+
+    const colonnes = ["Référence", "Date", "Catégorie", "Description", "Montant"];
+    exporterExcelMisEnFormeMultiFeuilles("Rapport_Caisse_Onyx_Pharm", [
+      { nom: "Encaissements", colonnes, lignes: lignesEnc },
+      { nom: "Décaissements", colonnes, lignes: lignesDec },
     ]);
   }
 
@@ -660,15 +675,13 @@ function RapportTiers() {
   const totalDettes = dettes.reduce((s, d) => s + d.dette, 0);
 
   function exporter() {
-    exporterExcel("rapport-creances-dettes", [
-      {
-        nom: "Créances clients",
-        lignes: creances.map((c) => ({ Référence: c.reference, Créance: c.creance })),
-      },
-      {
-        nom: "Dettes fournisseurs",
-        lignes: dettes.map((d) => ({ Référence: d.reference, Dette: d.dette })),
-      },
+    const lignesCreances = creances.map((c) => ({ Référence: c.reference, Créance: c.creance }));
+    lignesCreances.push({ Référence: "TOTAL", Créance: totalCreances });
+    const lignesDettes = dettes.map((d) => ({ Référence: d.reference, Dette: d.dette }));
+    lignesDettes.push({ Référence: "TOTAL", Dette: totalDettes });
+    exporterExcelMisEnFormeMultiFeuilles("Rapport_Creances_Dettes_Onyx_Pharm", [
+      { nom: "Créances clients", colonnes: ["Référence", "Créance"], lignes: lignesCreances },
+      { nom: "Dettes fournisseurs", colonnes: ["Référence", "Dette"], lignes: lignesDettes },
     ]);
   }
 

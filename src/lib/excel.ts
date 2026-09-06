@@ -14,35 +14,34 @@ export async function exporterExcelMisEnForme(
   colonnes: string[],
   lignes: Record<string, unknown>[]
 ) {
+  await exporterExcelMisEnFormeMultiFeuilles(nomFichier, [
+    { nom: nomFeuille, colonnes, lignes },
+  ]);
+}
+
+/**
+ * Variante multi-feuilles d'exporterExcelMisEnForme, pour les rapports
+ * qui regroupent plusieurs tableaux (ex : Encaissements et Décaissements)
+ * dans un même classeur, avec la même mise en forme partout.
+ */
+export async function exporterExcelMisEnFormeMultiFeuilles(
+  nomFichier: string,
+  feuilles: { nom: string; colonnes: string[]; lignes: Record<string, unknown>[] }[]
+) {
   const classeur = new ExcelJS.Workbook();
-  const feuille = classeur.addWorksheet(nomFeuille.slice(0, 31));
 
-  feuille.columns = colonnes.map((c) => ({
-    header: c,
-    key: c,
-    width: Math.min(Math.max(c.length + 4, 14), 40),
-  }));
+  for (const { nom, colonnes, lignes } of feuilles) {
+    const feuille = classeur.addWorksheet(nom.slice(0, 31));
 
-  const ligneEntete = feuille.getRow(1);
-  ligneEntete.eachCell((cell) => {
-    cell.font = { name: "Arial Narrow", size: 12, bold: true };
-    cell.alignment = {
-      horizontal: "center",
-      vertical: "middle",
-      wrapText: true,
-    };
-    cell.border = {
-      top: { style: "thin" },
-      bottom: { style: "thin" },
-      left: { style: "thin" },
-      right: { style: "thin" },
-    };
-  });
+    feuille.columns = colonnes.map((c) => ({
+      header: c,
+      key: c,
+      width: Math.min(Math.max(c.length + 4, 14), 40),
+    }));
 
-  for (const ligne of lignes) {
-    const row = feuille.addRow(ligne);
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.font = { name: "Arial Narrow", size: 12 };
+    const ligneEntete = feuille.getRow(1);
+    ligneEntete.eachCell((cell) => {
+      cell.font = { name: "Arial Narrow", size: 12, bold: true };
       cell.alignment = {
         horizontal: "center",
         vertical: "middle",
@@ -55,6 +54,24 @@ export async function exporterExcelMisEnForme(
         right: { style: "thin" },
       };
     });
+
+    for (const ligne of lignes) {
+      const row = feuille.addRow(ligne);
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        cell.font = { name: "Arial Narrow", size: 12 };
+        cell.alignment = {
+          horizontal: "center",
+          vertical: "middle",
+          wrapText: true,
+        };
+        cell.border = {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+    }
   }
 
   const buffer = await classeur.xlsx.writeBuffer();

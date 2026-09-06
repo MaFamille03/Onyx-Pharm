@@ -13,7 +13,6 @@ import { logSupabaseError } from "@/lib/errors";
 import { getStockInitialId } from "@/lib/conteneurs";
 import { normaliser, trouverOuCreer } from "@/lib/normaliser";
 import {
-  exporterExcel,
   exporterExcelMisEnForme,
   lireFichierExcel,
 } from "@/lib/excel";
@@ -58,16 +57,32 @@ export function ImportExportManager() {
 
   async function exporterTable(
     type: string,
+    nomAffiche: string,
     table: string,
     select: string,
-    mapper: (row: Record<string, unknown>) => Record<string, unknown>
+    mapper: (row: Record<string, unknown>) => Record<string, unknown>,
+    champTotal?: string
   ) {
     setExportingType(type);
     const { data } = await supabase.from(table).select(select);
     if (data) {
-      exporterExcel(
-        `export-${type}`,
-        [{ nom: type, lignes: (data as unknown as Record<string, unknown>[]).map(mapper) }]
+      const lignesExport = (data as unknown as Record<string, unknown>[]).map(mapper);
+      if (champTotal && lignesExport.length > 0) {
+        const total = lignesExport.reduce(
+          (s, l) => s + (Number(l[champTotal]) || 0),
+          0
+        );
+        const ligneTotal: Record<string, unknown> = {};
+        for (const cle of Object.keys(lignesExport[0])) ligneTotal[cle] = "";
+        ligneTotal[Object.keys(lignesExport[0])[0]] = "TOTAL";
+        ligneTotal[champTotal] = total;
+        lignesExport.push(ligneTotal);
+      }
+      await exporterExcelMisEnForme(
+        `Export_${nomAffiche.replace(/\s+/g, "_")}_Onyx_Pharm`,
+        nomAffiche,
+        lignesExport.length > 0 ? Object.keys(lignesExport[0]) : [],
+        lignesExport
       );
     }
     setExportingType(null);
@@ -330,6 +345,7 @@ export function ImportExportManager() {
             onClick={() =>
               exporterTable(
                 "articles",
+                "Articles",
                 "articles",
                 "designation, marque, prix_vente_conseille, stock_minimum, statut",
                 (r) => ({
@@ -352,6 +368,7 @@ export function ImportExportManager() {
             onClick={() =>
               exporterTable(
                 "ventes",
+                "Ventes",
                 "ventes",
                 "reference, date_vente, montant_total, montant_paye, statut",
                 (r) => ({
@@ -360,7 +377,8 @@ export function ImportExportManager() {
                   Total: r.montant_total,
                   Payé: r.montant_paye,
                   Statut: r.statut,
-                })
+                }),
+                "Total"
               )
             }
             loading={exportingType === "ventes"}
@@ -374,6 +392,7 @@ export function ImportExportManager() {
             onClick={() =>
               exporterTable(
                 "conteneurs",
+                "Conteneurs",
                 "conteneurs",
                 "code, date_arrivee, montant_achat_global, montant_paye, statut",
                 (r) => ({
@@ -382,7 +401,8 @@ export function ImportExportManager() {
                   "Montant d'achat": r.montant_achat_global,
                   Payé: r.montant_paye,
                   Statut: r.statut,
-                })
+                }),
+                "Montant d'achat"
               )
             }
             loading={exportingType === "conteneurs"}
@@ -396,6 +416,7 @@ export function ImportExportManager() {
             onClick={() =>
               exporterTable(
                 "encaissements",
+                "Encaissements",
                 "encaissements",
                 "reference, date_operation, montant, categorie, description",
                 (r) => ({
@@ -404,7 +425,8 @@ export function ImportExportManager() {
                   Montant: r.montant,
                   Catégorie: r.categorie,
                   Description: r.description,
-                })
+                }),
+                "Montant"
               )
             }
             loading={exportingType === "encaissements"}
@@ -418,6 +440,7 @@ export function ImportExportManager() {
             onClick={() =>
               exporterTable(
                 "decaissements",
+                "Décaissements",
                 "decaissements",
                 "reference, date_operation, montant, categorie, description",
                 (r) => ({
@@ -426,7 +449,8 @@ export function ImportExportManager() {
                   Montant: r.montant,
                   Catégorie: r.categorie,
                   Description: r.description,
-                })
+                }),
+                "Montant"
               )
             }
             loading={exportingType === "decaissements"}

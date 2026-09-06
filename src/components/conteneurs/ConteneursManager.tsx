@@ -815,6 +815,9 @@ function ConteneurDetail({
   const [paiementModalOpen, setPaiementModalOpen] = useState(false);
   const [montantPaiement, setMontantPaiement] = useState("");
   const [modePaiement, setModePaiement] = useState("Espèces");
+  const [datePaiement, setDatePaiement] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
 
   const [editionOuverte, setEditionOuverte] = useState(false);
   const [editCode, setEditCode] = useState("");
@@ -904,6 +907,7 @@ function ConteneurDetail({
       conteneur_id: conteneurId,
       montant,
       mode_paiement: modePaiement,
+      date_paiement: datePaiement,
       created_by: user?.id ?? null,
     });
 
@@ -1155,6 +1159,7 @@ function ConteneurDetail({
           <PrimaryButton
             onClick={() => {
               setMontantPaiement(String(reste));
+              setDatePaiement(new Date().toISOString().slice(0, 10));
               setError(null);
               setPaiementModalOpen(true);
             }}
@@ -1353,6 +1358,18 @@ function ConteneurDetail({
               <option value="Mobile Money">Mobile Money</option>
               <option value="Autre">Autre</option>
             </SelectField>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+                Date du paiement
+              </label>
+              <input
+                type="date"
+                required
+                value={datePaiement}
+                onChange={(e) => setDatePaiement(e.target.value)}
+                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+              />
+            </div>
             <div className="flex gap-3 pt-2">
               <SecondaryButton type="button" onClick={() => setPaiementModalOpen(false)} className="flex-1">
                 Annuler
