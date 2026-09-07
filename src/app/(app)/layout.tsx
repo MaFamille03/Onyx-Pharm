@@ -36,7 +36,11 @@ export default async function AppLayout({
   }
 
   return (
-    <AppShell userEmail={user.email ?? null} presentationVue={profile?.presentation_vue ?? true}>
+    <AppShell
+      userEmail={user.email ?? null}
+      presentationVue={profile?.presentation_vue ?? true}
+      nomComplet={profile?.nom_complet ?? null}
+    >
       {children}
     </AppShell>
   );

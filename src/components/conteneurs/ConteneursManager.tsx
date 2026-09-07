@@ -1252,7 +1252,7 @@ function ConteneurDetail({
                 <p className="text-sm font-medium text-onyx-700">
                   {coutRevient.revenu_realise.toLocaleString("fr-FR")}
                 </p>
-                <p className="text-xs text-onyx-400">Revenu déjà encaissé</p>
+                <p className="text-xs text-onyx-400">Revenu déjà généré</p>
               </div>
               <div className="text-center">
                 <p className="text-sm font-medium text-onyx-700">
@@ -1268,7 +1268,7 @@ function ConteneurDetail({
                       : "text-red-500"
                   }`}
                 >
-                  {(coutRevient.marge_realisee ?? 0).toLocaleString("fr-FR")}
+                  {Math.round(coutRevient.marge_realisee ?? 0).toLocaleString("fr-FR")}
                 </p>
                 <p className="text-xs text-onyx-400">Marge déjà réalisée</p>
               </div>

@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { UserCog } from "lucide-react";
+import { UserCog, Users2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton } from "@/components/ui/Buttons";
-import { InlineBanner } from "@/components/ui/Badges";
+import { InlineBanner, StatutBadge } from "@/components/ui/Badges";
+
+type AutreProfil = {
+  id: string;
+  email: string | null;
+  nom_complet: string | null;
+  compte_statut: string;
+  created_at: string;
+};
 
 export default function UtilisateursPage() {
   const supabase = createClient();
@@ -15,6 +23,8 @@ export default function UtilisateursPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [autresProfils, setAutresProfils] = useState<AutreProfil[]>([]);
+  const [loadingListe, setLoadingListe] = useState(true);
 
   useEffect(() => {
     async function load() {
@@ -39,6 +49,14 @@ export default function UtilisateursPage() {
         .maybeSingle();
       setNomComplet(profile?.nom_complet ?? "");
       setLoading(false);
+
+      const { data: tous } = await supabase
+        .from("profiles")
+        .select("id, email, nom_complet, compte_statut, created_at")
+        .neq("id", user.id)
+        .order("created_at", { ascending: true });
+      setAutresProfils((tous as AutreProfil[]) ?? []);
+      setLoadingListe(false);
     }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,15 +123,53 @@ export default function UtilisateursPage() {
         )}
       </div>
 
-      <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-dashed border-onyx-200 bg-white px-6 py-12 text-center">
-        <p className="text-sm font-medium text-onyx-700">
-          Liste des utilisateurs et gestion des comptes
+      <div className="mt-6">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-onyx-800">
+          <Users2 size={16} />
+          Autres utilisateurs de l&apos;application
+        </h2>
+        <p className="mt-1 text-xs text-onyx-400">
+          Tous les comptes connectés partagent les mêmes données. Cette
+          liste est consultative — chacun ne peut modifier que son propre
+          nom, ci-dessus.
         </p>
-        <p className="mt-1 max-w-sm text-sm text-onyx-400">
-          La liste complète des comptes de l&apos;équipe sera développée
-          ultérieurement ; l&apos;historique (menu Historique) trace déjà
-          les actions de chaque utilisateur connecté.
-        </p>
+
+        <div className="mt-3 space-y-2">
+          {loadingListe ? (
+            <p className="py-6 text-center text-sm text-onyx-400">
+              Chargement...
+            </p>
+          ) : autresProfils.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-onyx-200 bg-white px-6 py-8 text-center">
+              <p className="text-sm text-onyx-400">
+                Aucun autre utilisateur pour le moment.
+              </p>
+            </div>
+          ) : (
+            autresProfils.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between rounded-lg border border-onyx-100 bg-white px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-onyx-100 text-onyx-500">
+                    <UserCog size={16} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-onyx-800">
+                      {p.nom_complet || p.email || "—"}
+                    </p>
+                    <p className="text-xs text-onyx-400">
+                      Depuis le{" "}
+                      {new Date(p.created_at).toLocaleDateString("fr-FR")}
+                    </p>
+                  </div>
+                </div>
+                <StatutBadge statut={p.compte_statut} />
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
