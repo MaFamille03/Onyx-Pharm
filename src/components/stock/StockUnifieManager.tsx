@@ -39,7 +39,7 @@ export function StockUnifieManager() {
           </SecondaryButton>
           <SecondaryButton onClick={() => setConteneurOuvert(true)} className="shrink-0">
             <Package2 size={15} />
-            Conteneur
+            Commande
           </SecondaryButton>
         </div>
       </div>

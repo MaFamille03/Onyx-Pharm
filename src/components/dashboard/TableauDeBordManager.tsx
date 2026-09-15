@@ -320,11 +320,11 @@ export function TableauDeBordManager({
 
             <div className="rounded-xl border border-onyx-100 bg-white p-4">
               <h2 className="text-sm font-semibold text-onyx-800">
-                Conteneurs récents
+                Commandes récentes
               </h2>
               {conteneursRecents.length === 0 ? (
                 <p className="mt-2 text-sm text-onyx-400">
-                  Aucun conteneur sur la période.
+                  Aucune commande sur la période.
                 </p>
               ) : (
                 <div className="mt-2 space-y-1.5">

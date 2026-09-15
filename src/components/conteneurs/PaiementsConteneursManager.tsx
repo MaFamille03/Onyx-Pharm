@@ -199,10 +199,10 @@ export function PaiementsConteneursManager() {
   return (
     <div>
       <h1 className="text-xl font-semibold text-onyx-900 sm:text-2xl">
-        Paiements de conteneurs
+        Paiements de commandes
       </h1>
       <p className="mt-1 text-sm text-onyx-500">
-        Dettes fournisseurs en cours (par conteneur) et historique des
+        Dettes fournisseurs en cours (par commande) et historique des
         règlements. Sans rapport avec les ventes.
       </p>
 
@@ -215,7 +215,7 @@ export function PaiementsConteneursManager() {
           </h2>
           {dettes.length === 0 ? (
             <p className="mt-2 text-sm text-onyx-400">
-              Aucune dette de conteneur en cours.
+              Aucune dette de commande en cours.
             </p>
           ) : (
             <div className="mt-2 space-y-2">
@@ -252,7 +252,7 @@ export function PaiementsConteneursManager() {
                 <thead>
                   <tr className="border-b border-onyx-100 bg-onyx-50/50 text-left text-xs font-medium uppercase tracking-wide text-onyx-400">
                     <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Conteneur</th>
+                    <th className="px-4 py-3">Commande</th>
                     <th className="px-4 py-3">Fournisseur</th>
                     <th className="px-4 py-3">Mode</th>
                     <th className="px-4 py-3 text-right">Montant</th>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, MapPin, Trash2 } from "lucide-react";
+import { Plus, MapPin, Trash2, Pencil, Check, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { FormField } from "@/components/auth/FormField";
@@ -23,6 +23,9 @@ export function EmplacementsSection() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aSupprimer, setASupprimer] = useState<Emplacement | null>(null);
+  const [enEdition, setEnEdition] = useState<string | null>(null);
+  const [nomEdition, setNomEdition] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +86,31 @@ export function EmplacementsSection() {
     load();
   }
 
+  async function renommer(item: Emplacement) {
+    if (!nomEdition.trim()) return;
+    setEditSaving(true);
+    setError(null);
+    const { error } = await supabase
+      .from("emplacements")
+      .update({ nom: nomEdition.trim() })
+      .eq("id", item.id);
+    setEditSaving(false);
+    if (error) {
+      setError(
+        error.code === "23505"
+          ? "Un emplacement porte déjà ce nom."
+          : logSupabaseError(
+              { table: "emplacements", operation: "update (renommer)" },
+              error,
+              "Impossible de renommer cet emplacement. Réessayez."
+            )
+      );
+      return;
+    }
+    setEnEdition(null);
+    load();
+  }
+
   async function supprimer(item: Emplacement) {
     setError(null);
     const { error } = await supabase.from("emplacements").delete().eq("id", item.id);
@@ -137,38 +165,82 @@ export function EmplacementsSection() {
             Chargement...
           </p>
         ) : (
-          items.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center justify-between rounded-lg border border-onyx-100 bg-white px-4 py-3"
-            >
-              <div className="flex items-center gap-2.5">
-                <MapPin size={16} className="text-onyx-400" />
-                <span
-                  className={`text-sm font-medium ${
-                    item.actif ? "text-onyx-800" : "text-onyx-400 line-through"
-                  }`}
-                >
-                  {item.nom}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <SecondaryButton
-                  onClick={() => toggleActif(item)}
-                  className="min-h-0 px-3 py-1.5 text-xs"
-                >
-                  {item.actif ? "Désactiver" : "Réactiver"}
-                </SecondaryButton>
+          items.map((item) =>
+            enEdition === item.id ? (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 rounded-lg border border-accent-200 bg-accent-50/40 px-4 py-2.5"
+              >
+                <MapPin size={16} className="shrink-0 text-onyx-400" />
+                <input
+                  autoFocus
+                  value={nomEdition}
+                  onChange={(e) => setNomEdition(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") renommer(item);
+                    if (e.key === "Escape") setEnEdition(null);
+                  }}
+                  className="flex-1 rounded-md border border-onyx-200 px-2.5 py-1.5 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                />
                 <button
-                  onClick={() => setASupprimer(item)}
-                  className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
-                  aria-label="Supprimer"
+                  onClick={() => renommer(item)}
+                  disabled={editSaving}
+                  className="rounded-md p-1.5 text-emerald-600 hover:bg-emerald-50"
+                  aria-label="Valider"
                 >
-                  <Trash2 size={15} />
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={() => setEnEdition(null)}
+                  className="rounded-md p-1.5 text-onyx-400 hover:bg-onyx-100"
+                  aria-label="Annuler"
+                >
+                  <X size={16} />
                 </button>
               </div>
-            </div>
-          ))
+            ) : (
+              <div
+                key={item.id}
+                className="flex items-center justify-between rounded-lg border border-onyx-100 bg-white px-4 py-3"
+              >
+                <div className="flex items-center gap-2.5">
+                  <MapPin size={16} className="text-onyx-400" />
+                  <span
+                    className={`text-sm font-medium ${
+                      item.actif ? "text-onyx-800" : "text-onyx-400 line-through"
+                    }`}
+                  >
+                    {item.nom}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setEnEdition(item.id);
+                      setNomEdition(item.nom);
+                    }}
+                    className="rounded-md p-1.5 text-onyx-400 hover:bg-onyx-100 hover:text-onyx-700"
+                    aria-label="Modifier le nom"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <SecondaryButton
+                    onClick={() => toggleActif(item)}
+                    className="min-h-0 px-3 py-1.5 text-xs"
+                  >
+                    {item.actif ? "Désactiver" : "Réactiver"}
+                  </SecondaryButton>
+                  <button
+                    onClick={() => setASupprimer(item)}
+                    className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                    aria-label="Supprimer"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            )
+          )
         )}
       </div>
 

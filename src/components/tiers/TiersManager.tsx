@@ -99,7 +99,7 @@ export function TiersManager({
     if (error) {
       throw new Error(
         error.code === "23503"
-          ? `Ce ${titreSingulier} est utilisé ailleurs (ventes, conteneurs...) et ne peut pas être supprimé.`
+          ? `Ce ${titreSingulier} est utilisé ailleurs (ventes, commandes...) et ne peut pas être supprimé.`
           : logSupabaseError(
               { table, operation: "delete" },
               error,

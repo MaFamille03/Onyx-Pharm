@@ -226,7 +226,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       const stockInitialId = await getStockInitialId(supabase);
       if (!stockInitialId) {
         setAjustementError(
-          "Conteneur « Stock Initial » introuvable. Exécutez la migration 0015 dans Supabase."
+          "Commande « Stock Initial » introuvable. Exécutez la migration 0015 dans Supabase."
         );
         setAjustementSaving(false);
         return;

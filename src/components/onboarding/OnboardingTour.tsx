@@ -33,7 +33,7 @@ const ETAPES = [
   },
   {
     icon: Truck,
-    titre: "Conteneurs",
+    titre: "Commandes",
     description:
       "Chaque arrivage de marchandise se déclare ici, avec son fournisseur, sa date et son coût — le point de départ de tout votre stock.",
   },

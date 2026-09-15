@@ -141,17 +141,17 @@ function ListeConteneurs({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-onyx-900 sm:text-2xl">
-            Conteneurs
+            Commandes
           </h1>
           <p className="mt-1 text-sm text-onyx-500">
             Chaque arrivée de marchandise est un lot indépendant, avec son
             propre prix d&apos;achat global. Le stock affiché ailleurs reste
-            toujours la somme de tous les conteneurs.
+            toujours la somme de toutes les commandes.
           </p>
         </div>
         <PrimaryButton onClick={onCreate} className="shrink-0">
           <Plus size={17} />
-          Nouveau conteneur
+          Nouvelle commande
         </PrimaryButton>
       </div>
 
@@ -161,7 +161,7 @@ function ListeConteneurs({
         ) : conteneurs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-onyx-200 bg-white py-14 text-center">
             <p className="text-sm font-medium text-onyx-600">
-              Aucun conteneur trouvé
+              Aucune commande trouvée
             </p>
           </div>
         ) : (
@@ -277,7 +277,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
 
   function telechargerModele() {
     exporterExcelMisEnForme(
-      "Modèle_Conteneur_Onyx_Pharm",
+      "Modèle_Commande_Onyx_Pharm",
       "Modèle",
       COLONNES_MODELE,
       []
@@ -354,7 +354,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
     setError(null);
 
     if (!code.trim()) {
-      setError("Le code du conteneur est obligatoire.");
+      setError("Le code de la commande est obligatoire.");
       return;
     }
     if (nbLignesValides === 0) {
@@ -456,7 +456,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
           logSupabaseError(
             { table: "articles", operation: "insert (conteneur)" },
             articleError,
-            `Impossible de créer l'article "${row["Désignation"]}". Le conteneur n'a pas été créé.`
+            `Impossible de créer l'article "${row["Désignation"]}". La commande n'a pas été créée.`
           )
         );
         setSaving(false);
@@ -518,8 +518,8 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
           { table: "conteneurs", operation: "rpc creer_conteneur" },
           rpcError,
           rpcError.code === "23505"
-            ? "Ce code de conteneur existe déjà."
-            : "Impossible de créer le conteneur. Réessayez."
+            ? "Ce code de commande existe déjà."
+            : "Impossible de créer la commande. Réessayez."
         )
       );
       return;
@@ -537,14 +537,14 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
         className="mb-4 flex items-center gap-1.5 text-sm font-medium text-onyx-500 hover:text-onyx-800"
       >
         <ArrowLeft size={16} />
-        Retour aux conteneurs
+        Retour aux commandes
       </button>
 
       <h1 className="text-xl font-semibold text-onyx-900 sm:text-2xl">
-        Nouveau conteneur
+        Nouvelle commande
       </h1>
       <p className="mt-1 text-sm text-onyx-500">
-        Un seul montant d&apos;achat global pour tout le conteneur — aucun
+        Un seul montant d&apos;achat global pour toute la commande — aucun
         prix par article.
       </p>
 
@@ -554,7 +554,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
         <div className="grid grid-cols-1 gap-4 rounded-xl border border-onyx-100 bg-white p-4 sm:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-              Code du conteneur
+              Code de la commande
             </label>
             <input
               value={code}
@@ -607,7 +607,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
             Ajouter des articles par import Excel
           </h2>
           <p className="mt-1 text-xs text-onyx-400">
-            Méthode recommandée pour un conteneur avec plusieurs articles —
+            Méthode recommandée pour une commande avec plusieurs articles —
             évite la saisie manuelle répétitive. Les articles inconnus du
             catalogue sont créés automatiquement.
           </p>
@@ -782,7 +782,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
             Annuler
           </SecondaryButton>
           <PrimaryButton type="submit" loading={saving} className="flex-1">
-            Créer le conteneur
+            Créer la commande
           </PrimaryButton>
         </div>
       </form>
@@ -964,7 +964,7 @@ function ConteneurDetail({
   async function handleModifier(e: React.FormEvent) {
     e.preventDefault();
     if (!editCode.trim()) {
-      setEditError("Le code du conteneur est obligatoire.");
+      setEditError("Le code de la commande est obligatoire.");
       return;
     }
 
@@ -1002,7 +1002,7 @@ function ConteneurDetail({
         { table: "conteneurs", operation: "rpc modifier_conteneur" },
         error,
         error.code === "23505"
-          ? "Ce code de conteneur existe déjà."
+          ? "Ce code de commande existe déjà."
           : "Impossible d'enregistrer les modifications."
       );
       if (pin !== null) throw new Error(message);
@@ -1073,7 +1073,7 @@ function ConteneurDetail({
         logSupabaseError(
           { table: "stocks", operation: "rpc modifier_ligne_conteneur" },
           error,
-          "Impossible d'ajouter cet article au conteneur."
+          "Impossible d'ajouter cet article à la commande."
         )
       );
     }
@@ -1094,7 +1094,7 @@ function ConteneurDetail({
         logSupabaseError(
           { table: "conteneurs", operation: "rpc supprimer_conteneur" },
           error,
-          "Impossible de supprimer ce conteneur."
+          "Impossible de supprimer cette commande."
         )
       );
     }
@@ -1142,7 +1142,7 @@ function ConteneurDetail({
         className="mb-4 flex items-center gap-1.5 text-sm font-medium text-onyx-500 hover:text-onyx-800"
       >
         <ArrowLeft size={16} />
-        Retour aux conteneurs
+        Retour aux commandes
       </button>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1217,7 +1217,7 @@ function ConteneurDetail({
         </div>
       ) : (
         <p className="mt-4 text-sm text-onyx-400">
-          Aucun montant d&apos;achat renseigné pour ce conteneur — pas de
+          Aucun montant d&apos;achat renseigné pour cette commande — pas de
           suivi de paiement possible.
         </p>
       )}
@@ -1228,12 +1228,12 @@ function ConteneurDetail({
           façon progressive avant même que le conteneur soit épuisé. */}
       <div className="mt-5 rounded-xl border border-onyx-100 bg-white p-4">
         <h2 className="text-sm font-semibold text-onyx-800">
-          Coût de revient du conteneur
+          Coût de revient de la commande
         </h2>
         {!montantDefini ? (
           <p className="mt-1.5 text-sm text-onyx-400">
             Non calculable : aucun montant d&apos;achat renseigné pour ce
-            conteneur.
+            commande.
           </p>
         ) : coutRevient ? (
           <div>
@@ -1278,12 +1278,12 @@ function ConteneurDetail({
               <p className="mt-3 text-xs text-onyx-400">
                 {coutRevient.stock_restant} unité
                 {coutRevient.stock_restant > 1 ? "s" : ""} encore en stock sur
-                ce conteneur — la marge ci-dessus n&apos;est donc que la
+                cette commande — la marge ci-dessus n&apos;est donc que la
                 partie déjà vendue ; elle continuera d&apos;évoluer.
               </p>
             ) : (
               <p className="mt-3 text-xs text-emerald-600">
-                Conteneur entièrement écoulé — la marge affichée est
+                Commande entièrement écoulée — la marge affichée est
                 définitive.
               </p>
             )}
@@ -1308,7 +1308,7 @@ function ConteneurDetail({
             {lignes.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-6 text-center text-onyx-400">
-                  Ce conteneur ne contient plus aucun article en stock.
+                  Cette commande ne contient plus aucun article en stock.
                 </td>
               </tr>
             ) : (
@@ -1346,7 +1346,7 @@ function ConteneurDetail({
         </table>
       </div>
       <p className="mt-1.5 text-xs text-onyx-400">
-        La quantité initiale est figée dès l&apos;arrivée du conteneur et ne
+        La quantité initiale est figée dès l&apos;arrivée de la commande et ne
         change jamais, même après une correction — elle sert de repère
         historique.
       </p>
@@ -1432,12 +1432,12 @@ function ConteneurDetail({
       )}
 
       {editionOuverte && (
-        <Modal title="Modifier le conteneur" onClose={() => setEditionOuverte(false)} wide>
+        <Modal title="Modifier la commande" onClose={() => setEditionOuverte(false)} wide>
           <form onSubmit={handleModifier} className="space-y-4">
             {editError && <InlineBanner message={editError} />}
             <div>
               <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-                Code du conteneur
+                Code de la commande
               </label>
               <input
                 value={editCode}
@@ -1503,7 +1503,7 @@ function ConteneurDetail({
                     type="search"
                     value={rechercheLigne}
                     onChange={(e) => setRechercheLigne(e.target.value)}
-                    placeholder="Rechercher un article dans ce conteneur..."
+                    placeholder="Rechercher un article dans cette commande..."
                     className="w-full rounded-md border border-onyx-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
                   />
                 </div>
@@ -1541,7 +1541,7 @@ function ConteneurDetail({
                 ))}
                 {lignes.length === 0 && (
                   <p className="text-sm text-onyx-400">
-                    Ce conteneur ne contient plus aucun article.
+                    Cette commande ne contient plus aucun article.
                   </p>
                 )}
               </div>
@@ -1552,7 +1552,7 @@ function ConteneurDetail({
                 className="mt-3 flex items-center gap-1.5 text-sm font-medium text-accent-600 hover:underline"
               >
                 <Plus size={15} />
-                Ajouter un article à ce conteneur
+                Ajouter un article à cette commande
               </button>
             </div>
 
@@ -1574,10 +1574,10 @@ function ConteneurDetail({
 
       {suppressionOuverte && (
         <PinModal
-          title="Supprimer ce conteneur"
+          title="Supprimer cette commande"
           message={
             (coutRevient?.stock_restant ?? 0) > 0
-              ? `Ce conteneur contient encore ${coutRevient?.stock_restant} unité(s) en stock : elles seront automatiquement transférées vers Stock Initial avant la suppression. Refusé si des ventes y font déjà référence.`
+              ? `Cette commande contient encore ${coutRevient?.stock_restant} unité(s) en stock : elles seront automatiquement transférées vers Stock Initial avant la suppression. Refusé si des ventes y font déjà référence.`
               : `Supprimer définitivement le conteneur "${conteneur.code}" ? Refusé automatiquement si des ventes y font déjà référence.`
           }
           onCancel={() => setSuppressionOuverte(false)}
@@ -1588,7 +1588,7 @@ function ConteneurDetail({
       {pinEditionOuverte && (
         <PinModal
           title="Confirmer les corrections de quantité"
-          message="Ce conteneur contient des quantités modifiées. Saisissez votre code PIN pour les enregistrer."
+          message="Cette commande contient des quantités modifiées. Saisissez votre code PIN pour les enregistrer."
           onCancel={() => setPinEditionOuverte(false)}
           onConfirm={enregistrerModificationConteneur}
         />
@@ -1596,8 +1596,8 @@ function ConteneurDetail({
 
       {ajoutLigneOuvert && (
         <PinModal
-          title="Ajouter un article à ce conteneur"
-          message="Le code PIN est requis pour ajouter cet article au conteneur."
+          title="Ajouter un article à cette commande"
+          message="Le code PIN est requis pour ajouter cet article à la commande."
           onCancel={() => setAjoutLigneOuvert(false)}
           onConfirm={confirmerAjoutLigne}
         >
@@ -1637,7 +1637,7 @@ function ConteneurDetail({
       {editionLigne && (
         <PinModal
           title="Corriger cette quantité"
-          message={`Nouvelle quantité pour "${editionLigne.designation}" dans ce conteneur (actuellement ${editionLigne.quantiteActuelle}) :`}
+          message={`Nouvelle quantité pour "${editionLigne.designation}" dans cette commande (actuellement ${editionLigne.quantiteActuelle}) :`}
           onCancel={() => setEditionLigne(null)}
           onConfirm={confirmerModificationLigne}
         >

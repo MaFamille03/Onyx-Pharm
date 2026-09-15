@@ -55,7 +55,7 @@ export function ConteneurLigneSelect({
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-onyx-500">
-        Conteneur (optionnel)
+        Commande (optionnel)
       </label>
       <select
         value={value}

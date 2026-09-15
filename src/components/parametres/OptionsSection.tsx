@@ -29,7 +29,7 @@ const GROUPES = [
   {
     groupe: "statut_operation",
     label: "Statuts d'opération",
-    description: "Utilisés pour les ventes, conteneurs, transferts, inventaires...",
+    description: "Utilisés pour les ventes, commandes, transferts, inventaires...",
   },
   {
     groupe: "categorie_caisse",

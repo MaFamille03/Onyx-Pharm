@@ -83,7 +83,7 @@ export function SecuriteSection() {
         </div>
         <p className="mt-1.5 text-xs text-onyx-400">
           Demandé avant toute suppression ou modification de donnée
-          sensible (article, conteneur, vente validée, paiement,
+          sensible (article, commande, vente validée, paiement,
           inventaire...). Partagé par tous les utilisateurs de
           l&apos;application.
         </p>

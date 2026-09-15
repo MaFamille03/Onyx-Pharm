@@ -29,7 +29,7 @@ export const NAVIGATION: NavSection[] = [
     icon: "package",
   },
   {
-    label: "Conteneurs",
+    label: "Commandes",
     href: "/stock/conteneurs",
     step: 10,
     icon: "package",

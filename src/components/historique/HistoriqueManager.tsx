@@ -111,7 +111,7 @@ export function HistoriqueManager() {
         (200 dernières entrées). Le bouton{" "}
         <Undo2 size={12} className="inline" /> permet d&apos;annuler une
         action précise (code PIN requis) lorsque c&apos;est possible sans
-        risque — corrections de quantité en conteneur, en inventaire déjà
+        risque — corrections de quantité en commande, en inventaire déjà
         validé, ou de prix de vente. Les autres actions restent
         consultables mais ne peuvent pas être annulées automatiquement.
       </p>

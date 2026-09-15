@@ -340,7 +340,7 @@ export function ArticleFormModal({
               </div>
               <p className="mt-1 text-xs text-onyx-400">
                 Quantité actuellement en stock (tous emplacements et
-                conteneurs confondus). Se corrige depuis Stock, pas ici.
+                commandes confondues). Se corrige depuis Stock, pas ici.
               </p>
             </div>
           )}

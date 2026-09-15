@@ -35,7 +35,7 @@ function resolvePeriode(p: PeriodeFiltre): { debut: string | null; fin: string |
 const TABS = [
   { id: "stock", label: "Stock", icon: Package },
   { id: "ventes", label: "Ventes", icon: ShoppingCart },
-  { id: "conteneurs", label: "Conteneurs", icon: Truck },
+  { id: "conteneurs", label: "Commandes", icon: Truck },
   { id: "caisse", label: "Caisse", icon: Wallet },
   { id: "tiers", label: "Créances / Dettes", icon: Users },
 ] as const;
@@ -445,8 +445,8 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
     }));
     rows.push({ Code: "TOTAL", Date: "", Fournisseur: "", "Montant d'achat": total, Statut: "" });
     exporterExcelMisEnForme(
-      "Rapport_Conteneurs_Onyx_Pharm",
-      "Conteneurs",
+      "Rapport_Commandes_Onyx_Pharm",
+      "Commandes",
       ["Code", "Date", "Fournisseur", "Montant d'achat", "Statut"],
       rows
     );
@@ -456,7 +456,7 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
     <div>
       <div className="flex items-center justify-between">
         <p className="text-sm text-onyx-500">
-          {lignes.length} conteneur{lignes.length > 1 ? "s" : ""} · Total :{" "}
+          {lignes.length} commande{lignes.length > 1 ? "s" : ""} · Total :{" "}
           <span className="font-medium text-onyx-800">
             {total.toLocaleString("fr-FR")} FCFA
           </span>

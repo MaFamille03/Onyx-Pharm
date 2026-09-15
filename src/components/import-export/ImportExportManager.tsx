@@ -19,6 +19,8 @@ import {
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
+import { ImportVentesSection } from "@/components/import-export/ImportVentesSection";
+import { ImportTiersSection } from "@/components/import-export/ImportTiersSection";
 
 const COLONNES_MODELE = [
   "Désignation",
@@ -337,7 +339,8 @@ export function ImportExportManager() {
         Import / Export
       </h1>
       <p className="mt-1 text-sm text-onyx-500">
-        Exportez vos données en Excel, ou importez une liste d&apos;articles.
+        Exportez vos données en Excel, ou importez une liste d&apos;articles,
+        de ventes, de clients ou de fournisseurs.
       </p>
 
       <div className="mt-6 rounded-xl border border-onyx-100 bg-white p-4">
@@ -394,7 +397,7 @@ export function ImportExportManager() {
             onClick={() =>
               exporterTable(
                 "conteneurs",
-                "Conteneurs",
+                "Commandes",
                 "conteneurs",
                 "code, date_arrivee, montant_achat_global, montant_paye, statut",
                 (r) => ({
@@ -411,7 +414,7 @@ export function ImportExportManager() {
             className="min-h-0 px-3 py-1.5 text-xs"
           >
             <Download size={14} />
-            Conteneurs
+            Commandes
           </SecondaryButton>
 
           <SecondaryButton
@@ -567,6 +570,14 @@ export function ImportExportManager() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="mt-6">
+        <ImportVentesSection />
+      </div>
+
+      <div className="mt-6">
+        <ImportTiersSection />
       </div>
     </div>
   );
