@@ -53,6 +53,13 @@ export function logSupabaseError(
         ? `Valeur refusée par une règle de cohérence de la base ("${nomContrainte}"). Vérifiez les valeurs saisies.`
         : messageUtilisateur;
     }
+    // Violation d'une clé étrangère : l'élément qu'on essaie de
+    // supprimer ou de modifier est encore référencé ailleurs (une
+    // vente, un mouvement, etc.) — message générique mais clair plutôt
+    // que le texte technique brut de PostgreSQL.
+    if (error.code === "23503") {
+      return "Impossible : cet élément est encore utilisé ailleurs dans l'application (vente, mouvement, ou autre donnée liée). Retirez d'abord ce qui en dépend, ou archivez-le plutôt que de le supprimer.";
+    }
   }
 
   return messageUtilisateur;
