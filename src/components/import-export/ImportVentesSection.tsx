@@ -66,6 +66,20 @@ export function ImportVentesSection() {
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
 
+  // Si un fichier a déjà été analysé et qu'on change de mode ensuite,
+  // les règles de validation (emplacement obligatoire ou non) changent
+  // aussi — on efface la liste pour éviter d'importer sur la base
+  // d'une analyse faite avec l'ancien mode.
+  useEffect(() => {
+    if (groupes.length > 0) {
+      setGroupes([]);
+      setErreurGenerale(
+        "Le mode a changé : rechargez le fichier pour ré-analyser les ventes avec les nouvelles règles."
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeHistorique]);
+
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
       {
@@ -87,6 +101,17 @@ export function ImportVentesSection() {
         Emplacement: emplacements[0]?.nom ?? "Entrepôt",
         Quantité: 3,
         "Prix de vente unitaire": 1000,
+        "Mode de paiement": "",
+        "Montant payé": "",
+      },
+      {
+        "N° de vente (regroupement)": "V2",
+        "Date de vente": "2025-03-15",
+        Client: "Ancien Client",
+        Article: "Gants stériles",
+        Emplacement: "",
+        Quantité: 20,
+        "Prix de vente unitaire": 300,
         "Mode de paiement": "",
         "Montant payé": "",
       },
@@ -141,8 +166,12 @@ export function ImportVentesSection() {
           const quantite = Number(l["Quantité"]);
           const prix = Number(l["Prix de vente unitaire"]) || 0;
 
-          if (!designation || !nomEmplacement || !quantite || quantite <= 0) {
-            erreurs.push("Ligne incomplète (article, emplacement, quantité obligatoires)");
+          if (!designation || !quantite || quantite <= 0) {
+            erreurs.push("Ligne incomplète (article et quantité obligatoires)");
+            continue;
+          }
+          if (!modeHistorique && !nomEmplacement) {
+            erreurs.push("Emplacement obligatoire pour une vente récente");
             continue;
           }
 
@@ -157,18 +186,38 @@ export function ImportVentesSection() {
             continue;
           }
 
-          const emplacement = emplacements.find(
-            (e) => normaliser(e.nom) === normaliser(nomEmplacement)
-          );
-          if (!emplacement) {
-            erreurs.push(`Emplacement "${nomEmplacement}" introuvable`);
+          // En mode "ventes anciennes", l'emplacement n'a plus aucun
+          // effet réel (rien n'est retiré du stock) — on ne bloque donc
+          // jamais sur lui : s'il est absent ou introuvable, on utilise
+          // un emplacement technique par défaut, juste pour respecter
+          // la structure de la base.
+          let emplacementId: string | undefined;
+          if (nomEmplacement) {
+            const emplacementTrouve = emplacements.find(
+              (e) => normaliser(e.nom) === normaliser(nomEmplacement)
+            );
+            emplacementId = emplacementTrouve?.id;
+            if (!emplacementId && !modeHistorique) {
+              erreurs.push(`Emplacement "${nomEmplacement}" introuvable`);
+              continue;
+            }
+          }
+          if (!emplacementId) {
+            if (!modeHistorique) {
+              erreurs.push("Emplacement obligatoire pour une vente récente");
+              continue;
+            }
+            emplacementId = emplacements[0]?.id;
+          }
+          if (!emplacementId) {
+            erreurs.push("Aucun emplacement n'existe dans le système.");
             continue;
           }
 
           lignesResolues.push({
             article_id: article.id,
             designation: article.designation,
-            emplacement_id: emplacement.id,
+            emplacement_id: emplacementId,
             quantite,
             prix,
           });
@@ -419,6 +468,10 @@ export function ImportVentesSection() {
             <strong>sans toucher au stock actuel</strong>. Décochez pour des
             ventes récentes, qui doivent réellement diminuer le stock
             disponible.
+            <br />
+            Dans ce mode, la colonne &quot;Emplacement&quot; devient{" "}
+            <strong>facultative</strong> — laissez-la vide si vous ne vous
+            en souvenez plus (voir la vente &quot;V2&quot; du modèle).
           </span>
         </span>
       </label>

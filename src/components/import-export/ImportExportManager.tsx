@@ -95,7 +95,42 @@ export function ImportExportManager() {
       "Modèle_Articles_Onyx_Pharm",
       "Modèle",
       COLONNES_MODELE,
-      []
+      [
+        {
+          Désignation: "Table d'opération",
+          Catégorie: "Chirurgie",
+          "Sous-catégorie": "",
+          Marque: "",
+          Fournisseur: "",
+          "Quantité en stock": 5,
+          "Stock minimum": 2,
+          "Prix de vente conseillé": 500000,
+          Emplacement: emplacements[0]?.nom ?? "Entrepôt",
+          "Numéro de lot": "",
+          "Date d'expiration": "",
+          Statut: "Actif",
+          Observations: "",
+        },
+        {
+          // Même article que la ligne du dessus : pas besoin de répéter
+          // catégorie/prix/etc., seuls la quantité et l'emplacement
+          // comptent — ça ajoute du stock sur ce second emplacement au
+          // lieu de créer l'article une deuxième fois.
+          Désignation: "Table d'opération",
+          Catégorie: "",
+          "Sous-catégorie": "",
+          Marque: "",
+          Fournisseur: "",
+          "Quantité en stock": 3,
+          "Stock minimum": "",
+          "Prix de vente conseillé": "",
+          Emplacement: "Bureau",
+          "Numéro de lot": "",
+          "Date d'expiration": "",
+          Statut: "",
+          Observations: "",
+        },
+      ]
     );
   }
 
@@ -103,8 +138,6 @@ export function ImportExportManager() {
     brutes: Record<string, unknown>[],
     designationsExistantes: Set<string>
   ): LigneImport[] {
-    const designationsVues = new Set<string>();
-
     return brutes.map((row, i) => {
       const erreurs: string[] = [];
       const designation = String(row["Désignation"] ?? "").trim();
@@ -114,13 +147,13 @@ export function ImportExportManager() {
       const dateExpiration = String(row["Date d'expiration"] ?? "").trim();
 
       if (!designation) erreurs.push("Désignation vide");
-      if (designation && designationsVues.has(normaliser(designation))) {
-        erreurs.push("Doublon dans le fichier");
-      }
       if (designation && designationsExistantes.has(normaliser(designation))) {
         erreurs.push("Cet article existe déjà dans le catalogue");
       }
-      if (designation) designationsVues.add(normaliser(designation));
+      // Un même nom d'article répété plusieurs fois dans CE fichier
+      // n'est plus une erreur : c'est le même article réparti sur
+      // plusieurs emplacements (voir plus bas, une seule création,
+      // les lignes suivantes ne font qu'ajouter du stock).
 
       if (quantite !== "" && quantite !== undefined && Number.isNaN(Number(quantite))) {
         erreurs.push("Quantité invalide");
@@ -203,50 +236,102 @@ export function ImportExportManager() {
 
     let reussies = 0;
     let echouees = 0;
+    // Suit les articles déjà créés PENDANT cet import (nom normalisé →
+    // id), pour qu'une désignation répétée dans le fichier (même
+    // article, emplacement différent) ne recrée pas l'article une
+    // deuxième fois — elle ajoute simplement du stock sur ce nouvel
+    // emplacement.
+    const articlesCreesCetImport = new Map<string, string>();
 
     for (const ligne of valides) {
       const row = ligne.data;
+      const designation = String(row["Désignation"]).trim();
+      const cleDesignation = normaliser(designation);
+      const quantiteInitiale = Number(row["Quantité en stock"]) || 0;
 
-      const categorieId = await trouverOuCreer(
-        String(row["Catégorie"] ?? ""),
-        categoriesTravail,
-        async (nomSaisi) => {
-          const { data } = await supabase
-            .from("categories")
-            .insert({ nom: nomSaisi })
-            .select("id, nom")
-            .single();
-          return data;
+      let articleId = articlesCreesCetImport.get(cleDesignation);
+
+      if (!articleId) {
+        const categorieId = await trouverOuCreer(
+          String(row["Catégorie"] ?? ""),
+          categoriesTravail,
+          async (nomSaisi) => {
+            const { data } = await supabase
+              .from("categories")
+              .insert({ nom: nomSaisi })
+              .select("id, nom")
+              .single();
+            return data;
+          }
+        );
+
+        const sousCategorieId = categorieId
+          ? await trouverOuCreer(
+              String(row["Sous-catégorie"] ?? ""),
+              sousCategoriesTravail.filter((sc) => sc.categorie_id === categorieId),
+              async (nomSaisi) => {
+                const { data } = await supabase
+                  .from("sous_categories")
+                  .insert({ nom: nomSaisi, categorie_id: categorieId })
+                  .select("id, nom, categorie_id")
+                  .single();
+                return data;
+              }
+            )
+          : null;
+
+        const fournisseurId = await trouverOuCreer(
+          String(row["Fournisseur"] ?? ""),
+          fournisseursTravail,
+          async (nomSaisi) => {
+            const { data } = await supabase
+              .from("fournisseurs")
+              .insert({ nom: nomSaisi })
+              .select("id, nom")
+              .single();
+            return data;
+          }
+        );
+
+        const statutValeur = String(row["Statut"] ?? "Actif").trim();
+        const statutFinal = statutsArticle.some(
+          (s) => normaliser(s.valeur) === normaliser(statutValeur)
+        )
+          ? statutsArticle.find((s) => normaliser(s.valeur) === normaliser(statutValeur))!.valeur
+          : "Actif";
+
+        const { data: article, error } = await supabase
+          .from("articles")
+          .insert({
+            designation,
+            categorie_id: categorieId,
+            sous_categorie_id: sousCategorieId,
+            marque: String(row["Marque"] ?? "").trim() || null,
+            fournisseur_id: fournisseurId,
+            stock_minimum: Number(row["Stock minimum"]) || 0,
+            prix_vente_conseille: Number(row["Prix de vente conseillé"]) || 0,
+            numero_lot: String(row["Numéro de lot"] ?? "").trim() || null,
+            date_expiration: String(row["Date d'expiration"] ?? "").trim() || null,
+            statut: statutFinal,
+            observations: String(row["Observations"] ?? "").trim() || null,
+            created_by: user?.id ?? null,
+          })
+          .select("id")
+          .single();
+
+        if (error || !article) {
+          logSupabaseError(
+            { table: "articles", operation: "insert (import Excel)" },
+            error,
+            ""
+          );
+          echouees += 1;
+          continue;
         }
-      );
 
-      const sousCategorieId = categorieId
-        ? await trouverOuCreer(
-            String(row["Sous-catégorie"] ?? ""),
-            sousCategoriesTravail.filter((sc) => sc.categorie_id === categorieId),
-            async (nomSaisi) => {
-              const { data } = await supabase
-                .from("sous_categories")
-                .insert({ nom: nomSaisi, categorie_id: categorieId })
-                .select("id, nom, categorie_id")
-                .single();
-              return data;
-            }
-          )
-        : null;
-
-      const fournisseurId = await trouverOuCreer(
-        String(row["Fournisseur"] ?? ""),
-        fournisseursTravail,
-        async (nomSaisi) => {
-          const { data } = await supabase
-            .from("fournisseurs")
-            .insert({ nom: nomSaisi })
-            .select("id, nom")
-            .single();
-          return data;
-        }
-      );
+        articleId = article.id;
+        articlesCreesCetImport.set(cleDesignation, article.id);
+      }
 
       const emplacementId = await trouverOuCreer(
         String(row["Emplacement"] ?? ""),
@@ -261,47 +346,10 @@ export function ImportExportManager() {
         }
       );
 
-      const statutValeur = String(row["Statut"] ?? "Actif").trim();
-      const statutFinal = statutsArticle.some(
-        (s) => normaliser(s.valeur) === normaliser(statutValeur)
-      )
-        ? statutsArticle.find((s) => normaliser(s.valeur) === normaliser(statutValeur))!.valeur
-        : "Actif";
-
-      const { data: article, error } = await supabase
-        .from("articles")
-        .insert({
-          designation: String(row["Désignation"]).trim(),
-          categorie_id: categorieId,
-          sous_categorie_id: sousCategorieId,
-          marque: String(row["Marque"] ?? "").trim() || null,
-          fournisseur_id: fournisseurId,
-          stock_minimum: Number(row["Stock minimum"]) || 0,
-          prix_vente_conseille: Number(row["Prix de vente conseillé"]) || 0,
-          numero_lot: String(row["Numéro de lot"] ?? "").trim() || null,
-          date_expiration: String(row["Date d'expiration"] ?? "").trim() || null,
-          statut: statutFinal,
-          observations: String(row["Observations"] ?? "").trim() || null,
-          created_by: user?.id ?? null,
-        })
-        .select("id")
-        .single();
-
-      if (error || !article) {
-        logSupabaseError(
-          { table: "articles", operation: "insert (import Excel)" },
-          error,
-          ""
-        );
-        echouees += 1;
-        continue;
-      }
-
-      const quantiteInitiale = Number(row["Quantité en stock"]) || 0;
       if (quantiteInitiale > 0 && emplacementId) {
         const { error: stockErr } = await supabase.from("stocks").upsert(
           {
-            article_id: article.id,
+            article_id: articleId,
             emplacement_id: emplacementId,
             conteneur_id: stockInitialId,
             quantite: quantiteInitiale,
@@ -316,7 +364,7 @@ export function ImportExportManager() {
           );
         }
         const { error: mouvementErr } = await supabase.from("mouvements_stock").insert({
-          article_id: article.id,
+          article_id: articleId,
           emplacement_id: emplacementId,
           type: "autre_entree",
           quantite: quantiteInitiale,
@@ -489,6 +537,12 @@ export function ImportExportManager() {
         <p className="mt-1 text-xs text-onyx-400">
           Téléchargez le modèle, remplissez-le, puis importez-le. Chaque
           ligne est contrôlée avant import.
+          <br />
+          Pour un même article présent dans plusieurs emplacements (voir
+          l&apos;exemple &quot;Table d&apos;opération&quot; du modèle) :
+          répétez son nom exact sur plusieurs lignes, une par emplacement —
+          seule la première crée l&apos;article, les suivantes ajoutent
+          juste du stock ailleurs.
         </p>
 
         <div className="mt-3 flex flex-wrap gap-2">
