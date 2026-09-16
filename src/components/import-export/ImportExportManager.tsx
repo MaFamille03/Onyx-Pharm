@@ -99,7 +99,10 @@ export function ImportExportManager() {
     );
   }
 
-  function validerLignes(brutes: Record<string, unknown>[]): LigneImport[] {
+  function validerLignes(
+    brutes: Record<string, unknown>[],
+    designationsExistantes: Set<string>
+  ): LigneImport[] {
     const designationsVues = new Set<string>();
 
     return brutes.map((row, i) => {
@@ -113,6 +116,9 @@ export function ImportExportManager() {
       if (!designation) erreurs.push("Désignation vide");
       if (designation && designationsVues.has(normaliser(designation))) {
         erreurs.push("Doublon dans le fichier");
+      }
+      if (designation && designationsExistantes.has(normaliser(designation))) {
+        erreurs.push("Cet article existe déjà dans le catalogue");
       }
       if (designation) designationsVues.add(normaliser(designation));
 
@@ -158,7 +164,16 @@ export function ImportExportManager() {
         setLignes([]);
         return;
       }
-      setLignes(validerLignes(brutes));
+      // Vérifie aussi les articles déjà existants en base, pour éviter
+      // de créer des doublons — pas seulement les doublons internes au
+      // fichier.
+      const { data: articlesExistants } = await supabase
+        .from("articles")
+        .select("designation");
+      const designationsExistantes = new Set(
+        (articlesExistants ?? []).map((a) => normaliser(a.designation))
+      );
+      setLignes(validerLignes(brutes, designationsExistantes));
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("[ONYX PHARM] Erreur lecture fichier import articles", e);

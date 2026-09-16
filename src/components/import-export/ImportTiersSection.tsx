@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { Upload, FileSpreadsheet } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
+import { normaliser } from "@/lib/normaliser";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
 
@@ -55,12 +56,26 @@ export function ImportTiersSection() {
 
       let reussis = 0;
       let echoues = 0;
+      let doublons = 0;
+      const nomsVus = new Set<string>();
+
+      const { data: existants } = await supabase.from(type).select("nom");
+      const nomsExistants = new Set(
+        (existants ?? []).map((t: { nom: string }) => normaliser(t.nom))
+      );
+
       for (const row of brutes) {
         const nom = String(row["Nom"] ?? "").trim();
         if (!nom) {
           echoues += 1;
           continue;
         }
+        const nomNormalise = normaliser(nom);
+        if (nomsExistants.has(nomNormalise) || nomsVus.has(nomNormalise)) {
+          doublons += 1;
+          continue;
+        }
+        nomsVus.add(nomNormalise);
         const { error } = await supabase.from(type).insert({
           nom,
           telephone: String(row["Téléphone"] ?? "").trim() || null,
@@ -73,9 +88,10 @@ export function ImportTiersSection() {
       }
 
       setResultat(
-        `${reussis} ${type === "clients" ? "client(s)" : "fournisseur(s)"} importé(s)${
-          echoues > 0 ? `, ${echoues} échec(s)` : ""
-        }.`
+        `${reussis} ${type === "clients" ? "client(s)" : "fournisseur(s)"} importé(s)` +
+          (doublons > 0 ? `, ${doublons} déjà existant(s) ignoré(s)` : "") +
+          (echoues > 0 ? `, ${echoues} échec(s)` : "") +
+          "."
       );
     } catch (err) {
       // eslint-disable-next-line no-console

@@ -24,6 +24,26 @@ const COLONNES_MODELE = [
 
 type LigneBrute = Record<string, unknown>;
 
+type LigneResolue = {
+  article_id: string;
+  designation: string;
+  emplacement_id: string;
+  quantite: number;
+  prix: number;
+};
+
+type GroupeVente = {
+  numero: string;
+  lignesBrutes: LigneBrute[];
+  lignesResolues: LigneResolue[];
+  dateVente: string | null;
+  nomClient: string;
+  montantTotal: number;
+  erreurs: string[];
+  doublonProbable: boolean;
+  valide: boolean;
+};
+
 export function ImportVentesSection() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
@@ -38,10 +58,13 @@ export function ImportVentesSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [lignes, setLignes] = useState<LigneBrute[]>([]);
+  const [groupes, setGroupes] = useState<GroupeVente[]>([]);
+  const [analyse, setAnalyse] = useState(false);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [resultat, setResultat] = useState<string | null>(null);
+  const [resultatErreur, setResultatErreur] = useState(false);
+  const [modeHistorique, setModeHistorique] = useState(false);
 
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
@@ -75,18 +98,126 @@ export function ImportVentesSection() {
     if (!file) return;
     setErreurGenerale(null);
     setResultat(null);
+    setGroupes([]);
+    setAnalyse(true);
+
     try {
       const brutes = await lireFichierExcel(file);
       if (brutes.length === 0) {
         setErreurGenerale("Ce fichier ne contient aucune ligne.");
+        setAnalyse(false);
         return;
       }
-      setLignes(brutes);
+
+      // Regroupe les lignes par numéro de vente.
+      const parGroupe = new Map<string, LigneBrute[]>();
+      for (const l of brutes) {
+        const cle = String(l["N° de vente (regroupement)"] ?? "").trim();
+        if (!cle) continue;
+        if (!parGroupe.has(cle)) parGroupe.set(cle, []);
+        parGroupe.get(cle)!.push(l);
+      }
+
+      if (parGroupe.size === 0) {
+        setErreurGenerale(
+          "Aucune ligne valide : la colonne \"N° de vente (regroupement)\" doit être renseignée."
+        );
+        setAnalyse(false);
+        return;
+      }
+
+      const resultats: GroupeVente[] = [];
+
+      for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
+        const premiere = lignesBrutes[0];
+        const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
+        const nomClient = String(premiere.Client ?? "").trim();
+        const erreurs: string[] = [];
+        const lignesResolues: LigneResolue[] = [];
+
+        for (const l of lignesBrutes) {
+          const designation = String(l.Article ?? "").trim();
+          const nomEmplacement = String(l.Emplacement ?? "").trim();
+          const quantite = Number(l["Quantité"]);
+          const prix = Number(l["Prix de vente unitaire"]) || 0;
+
+          if (!designation || !nomEmplacement || !quantite || quantite <= 0) {
+            erreurs.push("Ligne incomplète (article, emplacement, quantité obligatoires)");
+            continue;
+          }
+
+          const { data: article } = await supabase
+            .from("articles")
+            .select("id, designation")
+            .ilike("designation", designation)
+            .limit(1)
+            .maybeSingle();
+          if (!article) {
+            erreurs.push(`Article "${designation}" introuvable`);
+            continue;
+          }
+
+          const emplacement = emplacements.find(
+            (e) => normaliser(e.nom) === normaliser(nomEmplacement)
+          );
+          if (!emplacement) {
+            erreurs.push(`Emplacement "${nomEmplacement}" introuvable`);
+            continue;
+          }
+
+          lignesResolues.push({
+            article_id: article.id,
+            designation: article.designation,
+            emplacement_id: emplacement.id,
+            quantite,
+            prix,
+          });
+        }
+
+        const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
+
+        // Détection de doublon : une vente déjà enregistrée pour le même
+        // client, la même date et le même montant total existe-t-elle
+        // déjà ? Ce n'est qu'un signal d'alerte (pas un blocage) — deux
+        // vraies ventes différentes peuvent coïncider par hasard.
+        let doublonProbable = false;
+        if (nomClient && dateVente && montantTotal > 0) {
+          const clientExistant = clients.find(
+            (c) => normaliser(c.nom) === normaliser(nomClient)
+          );
+          if (clientExistant) {
+            const { data: doublons } = await supabase
+              .from("ventes")
+              .select("id")
+              .eq("client_id", clientExistant.id)
+              .eq("date_vente", dateVente)
+              .eq("montant_total", montantTotal)
+              .neq("statut", "Annulé")
+              .limit(1);
+            doublonProbable = Boolean(doublons && doublons.length > 0);
+          }
+        }
+
+        resultats.push({
+          numero,
+          lignesBrutes,
+          lignesResolues,
+          dateVente,
+          nomClient,
+          montantTotal,
+          erreurs,
+          doublonProbable,
+          valide: erreurs.length === 0,
+        });
+      }
+
+      setGroupes(resultats);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[ONYX PHARM] Erreur lecture fichier import ventes", err);
       setErreurGenerale("Impossible de lire ce fichier. Utilisez le modèle .xlsx fourni.");
     }
+    setAnalyse(false);
   }
 
   async function confirmerImport() {
@@ -97,36 +228,21 @@ export function ImportVentesSection() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const groupes = new Map<string, LigneBrute[]>();
-    for (const l of lignes) {
-      const cle = String(l["N° de vente (regroupement)"] ?? "").trim();
-      if (!cle) continue;
-      if (!groupes.has(cle)) groupes.set(cle, []);
-      groupes.get(cle)!.push(l);
-    }
-
-    if (groupes.size === 0) {
-      setErreurGenerale(
-        "Aucune ligne valide : la colonne \"N° de vente (regroupement)\" doit être renseignée."
-      );
-      setImporting(false);
-      return;
-    }
-
     const clientsTravail = [...clients];
     let reussies = 0;
     let enBrouillon = 0;
     let echouees = 0;
     const erreursDetail: string[] = [];
 
-    for (const [numero, groupeLignes] of Array.from(groupes.entries())) {
-      const premiere = groupeLignes[0];
-      const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
-      const nomClient = String(premiere.Client ?? "").trim();
+    for (const groupe of groupes) {
+      if (!groupe.valide) {
+        echouees += 1;
+        continue;
+      }
 
       let clientId: string | null = null;
-      if (nomClient) {
-        clientId = await trouverOuCreer(nomClient, clientsTravail, async (nomSaisi) => {
+      if (groupe.nomClient) {
+        clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
           const { data } = await supabase
             .from("clients")
             .insert({ nom: nomSaisi })
@@ -136,80 +252,23 @@ export function ImportVentesSection() {
         });
       }
 
-      const lignesResolues: {
-        article_id: string;
-        emplacement_id: string;
-        quantite: number;
-        prix: number;
-      }[] = [];
-      let erreurLigne: string | null = null;
-
-      for (const l of groupeLignes) {
-        const designation = String(l.Article ?? "").trim();
-        const nomEmplacement = String(l.Emplacement ?? "").trim();
-        const quantite = Number(l["Quantité"]);
-        const prix = Number(l["Prix de vente unitaire"]) || 0;
-
-        if (!designation || !nomEmplacement || !quantite || quantite <= 0) {
-          erreurLigne = `Vente ${numero} : ligne incomplète (article, emplacement et quantité obligatoires).`;
-          break;
-        }
-
-        const { data: article } = await supabase
-          .from("articles")
-          .select("id, designation")
-          .ilike("designation", designation)
-          .limit(1)
-          .maybeSingle();
-        if (!article) {
-          erreurLigne = `Vente ${numero} : article "${designation}" introuvable.`;
-          break;
-        }
-
-        const emplacement = emplacements.find(
-          (e) => normaliser(e.nom) === normaliser(nomEmplacement)
-        );
-        if (!emplacement) {
-          erreurLigne = `Vente ${numero} : emplacement "${nomEmplacement}" introuvable.`;
-          break;
-        }
-
-        lignesResolues.push({
-          article_id: article.id,
-          emplacement_id: emplacement.id,
-          quantite,
-          prix,
-        });
-      }
-
-      if (erreurLigne) {
-        erreursDetail.push(erreurLigne);
-        echouees += 1;
-        continue;
-      }
-
       const { data: refData, error: refError } = await supabase.rpc(
         "generer_numero_document",
         { p_prefixe: "FAC" }
       );
       if (refError || !refData) {
-        erreursDetail.push(`Vente ${numero} : impossible de générer une référence.`);
+        erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
         echouees += 1;
         continue;
       }
-
-      const montantTotal = lignesResolues.reduce(
-        (s, l) => s + l.quantite * l.prix,
-        0
-      );
 
       const { data: vente, error: venteError } = await supabase
         .from("ventes")
         .insert({
           reference: refData,
           client_id: clientId,
-          date_vente: dateVente ?? new Date().toISOString().slice(0, 10),
-          montant_total: montantTotal,
+          date_vente: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
+          montant_total: groupe.montantTotal,
           statut: "Brouillon",
           created_by: user?.id ?? null,
         })
@@ -221,7 +280,7 @@ export function ImportVentesSection() {
           logSupabaseError(
             { table: "ventes", operation: "insert (import Excel)" },
             venteError,
-            `Vente ${numero} : impossible de la créer.`
+            `Vente ${groupe.numero} : impossible de la créer.`
           )
         );
         echouees += 1;
@@ -229,7 +288,7 @@ export function ImportVentesSection() {
       }
 
       const { error: lignesError } = await supabase.from("lignes_ventes").insert(
-        lignesResolues.map((l) => ({
+        groupe.lignesResolues.map((l) => ({
           vente_id: vente.id,
           article_id: l.article_id,
           emplacement_id: l.emplacement_id,
@@ -242,43 +301,59 @@ export function ImportVentesSection() {
       );
 
       if (lignesError) {
-        erreursDetail.push(`Vente ${numero} : lignes non enregistrées.`);
+        erreursDetail.push(`Vente ${groupe.numero} : lignes non enregistrées.`);
         echouees += 1;
         continue;
       }
 
-      // Si au moins une ligne n'a pas de prix renseigné, la vente reste
-      // en brouillon — le prix doit d'abord être confirmé par
-      // quelqu'un, puis la vente validée manuellement depuis Ventes >
-      // Ventes. On ne valide automatiquement que si TOUS les prix sont
-      // connus.
-      const prixManquant = lignesResolues.some((l) => !l.prix || l.prix <= 0);
-
+      const prixManquant = groupe.lignesResolues.some((l) => !l.prix || l.prix <= 0);
       if (prixManquant) {
         enBrouillon += 1;
         continue;
       }
 
-      const { error: validationError } = await supabase.rpc("valider_vente", {
-        p_vente_id: vente.id,
-        p_utilisateur_id: user?.id ?? null,
-      });
+      if (modeHistorique) {
+        const { error: majStatutError } = await supabase
+          .from("ventes")
+          .update({ statut: "Validé" })
+          .eq("id", vente.id);
 
-      if (validationError) {
-        erreursDetail.push(
-          `Vente ${numero} créée en brouillon, mais non validée : ${validationError.message}`
-        );
-        enBrouillon += 1;
-        continue;
+        if (majStatutError) {
+          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée.`);
+          enBrouillon += 1;
+          continue;
+        }
+
+        await supabase.from("historique").insert({
+          utilisateur_id: user?.id ?? null,
+          action: "validation",
+          table_cible: "ventes",
+          enregistrement_id: vente.id,
+          description: `Vente historique ${refData} importée et validée sans impact sur le stock actuel (antérieure au suivi de stock).`,
+        });
+      } else {
+        const { error: validationError } = await supabase.rpc("valider_vente", {
+          p_vente_id: vente.id,
+          p_utilisateur_id: user?.id ?? null,
+        });
+
+        if (validationError) {
+          erreursDetail.push(
+            `Vente ${groupe.numero} créée en brouillon, mais non validée : ${validationError.message}`
+          );
+          enBrouillon += 1;
+          continue;
+        }
       }
 
+      const premiere = groupe.lignesBrutes[0];
       const montantPaye = Number(premiere["Montant payé"]) || 0;
       if (montantPaye > 0) {
         await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
           montant: montantPaye,
           mode_paiement: String(premiere["Mode de paiement"] ?? "").trim() || "Espèces",
-          date_paiement: dateVente ?? new Date().toISOString().slice(0, 10),
+          date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
       }
@@ -287,24 +362,24 @@ export function ImportVentesSection() {
     }
 
     setImporting(false);
+    const echecTotal = echouees > 0;
+    setResultatErreur(echecTotal);
     setResultat(
       `${reussies} vente(s) validée(s)` +
         (enBrouillon > 0
           ? `, ${enBrouillon} laissée(s) en brouillon (prix manquant — à confirmer puis valider dans Ventes)`
           : "") +
-        (echouees > 0 ? `, ${echouees} échec(s)` : "") +
+        (echouees > 0 ? `, ${echouees} échec(s) ou ignorée(s)` : "") +
         "." +
         (erreursDetail.length > 0 ? " Détail : " + erreursDetail.join(" | ") : "")
     );
-    setLignes([]);
+    setGroupes([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const nbGroupes = new Set(
-    lignes
-      .map((l) => String(l["N° de vente (regroupement)"] ?? "").trim())
-      .filter(Boolean)
-  ).size;
+  const nbValides = groupes.filter((g) => g.valide).length;
+  const nbErreurs = groupes.length - nbValides;
+  const nbDoublons = groupes.filter((g) => g.doublonProbable).length;
 
   return (
     <div className="rounded-xl border border-onyx-100 bg-white p-5">
@@ -316,14 +391,37 @@ export function ImportVentesSection() {
         Chaque ligne du fichier est un article vendu ; regroupez les
         articles d&apos;une même vente avec le même &quot;N° de
         vente&quot; dans la première colonne. Les articles doivent déjà
-        exister et être en stock — le client, lui, est créé
+        exister dans le catalogue — le client, lui, est créé
         automatiquement s&apos;il n&apos;existe pas encore.
         <br />
         <strong>Une vente sans prix de vente reste en brouillon</strong> —
         à confirmer et valider vous-même ensuite dans Ventes &gt; Ventes.
-        Seules les ventes avec tous leurs prix renseignés sont validées
-        automatiquement.
+        Une fois importée, chaque vente se consulte normalement dans
+        Ventes &gt; Ventes, avec son client et le détail de ses articles.
       </p>
+
+      <label className="mt-4 flex items-start gap-2.5 rounded-lg border border-onyx-200 bg-onyx-50 p-3.5">
+        <input
+          type="checkbox"
+          checked={modeHistorique}
+          onChange={(e) => setModeHistorique(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-onyx-300"
+        />
+        <span className="text-sm text-onyx-700">
+          <span className="font-medium">
+            Ventes anciennes, antérieures au suivi de stock ici
+          </span>
+          <br />
+          <span className="text-xs text-onyx-500">
+            À cocher si le stock est vide ou n&apos;a pas de rapport avec ces
+            ventes. Elles seront directement validées pour le chiffre
+            d&apos;affaires et l&apos;historique,{" "}
+            <strong>sans toucher au stock actuel</strong>. Décochez pour des
+            ventes récentes, qui doivent réellement diminuer le stock
+            disponible.
+          </span>
+        </span>
+      </label>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <SecondaryButton onClick={telechargerModele} className="min-h-0 px-3 py-2 text-xs">
@@ -353,24 +451,89 @@ export function ImportVentesSection() {
       )}
       {resultat && (
         <div className="mt-3">
-          <InlineBanner type="success" message={resultat} />
+          <InlineBanner
+            type={resultatErreur ? "error" : "success"}
+            message={resultat}
+          />
         </div>
       )}
+      {analyse && (
+        <p className="mt-3 text-sm text-onyx-400">
+          Analyse du fichier en cours (vérification des articles, des
+          emplacements et des doublons)...
+        </p>
+      )}
 
-      {lignes.length > 0 && (
-        <div className="mt-4 rounded-lg bg-onyx-50 p-4">
-          <p className="flex items-center gap-1.5 text-sm text-onyx-700">
-            <CheckCircle2 size={15} className="text-emerald-600" />
-            {lignes.length} ligne(s) lue(s), regroupées en {nbGroupes} vente(s).
-          </p>
-          <p className="mt-1 flex items-center gap-1.5 text-xs text-onyx-400">
-            <AlertCircle size={13} />
-            Vérifiez que les articles et emplacements existent déjà avant de
-            confirmer — ils ne seront pas créés automatiquement.
-          </p>
-          <PrimaryButton onClick={confirmerImport} loading={importing} className="mt-3">
-            Importer ces {nbGroupes} vente(s)
-          </PrimaryButton>
+      {groupes.length > 0 && (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-onyx-50/50 px-3.5 py-2.5 text-sm">
+            <span className="text-onyx-600">
+              {groupes.length} vente{groupes.length > 1 ? "s" : ""} détectée
+              {groupes.length > 1 ? "s" : ""}
+            </span>
+            <span className="flex items-center gap-1 text-emerald-600">
+              <CheckCircle2 size={14} /> {nbValides} valide{nbValides > 1 ? "s" : ""}
+            </span>
+            {nbErreurs > 0 && (
+              <span className="flex items-center gap-1 text-red-500">
+                <AlertCircle size={14} /> {nbErreurs} en erreur
+              </span>
+            )}
+            {nbDoublons > 0 && (
+              <span className="flex items-center gap-1 text-amber-600">
+                <AlertCircle size={14} /> {nbDoublons} doublon(s) possible(s)
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-onyx-100">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-onyx-50">
+                <tr className="text-left text-onyx-400">
+                  <th className="px-3 py-2">N°</th>
+                  <th className="px-3 py-2">Client</th>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Articles</th>
+                  <th className="px-3 py-2">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupes.map((g) => (
+                  <tr key={g.numero} className="border-t border-onyx-50">
+                    <td className="px-3 py-2 text-onyx-400">{g.numero}</td>
+                    <td className="px-3 py-2 text-onyx-700">
+                      {g.nomClient || "Client de passage"}
+                    </td>
+                    <td className="px-3 py-2 text-onyx-500">{g.dateVente ?? "—"}</td>
+                    <td className="px-3 py-2 text-onyx-500">
+                      {g.lignesResolues.map((l) => l.designation).join(", ") || "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {!g.valide ? (
+                        <span className="text-red-500">{g.erreurs.join(" · ")}</span>
+                      ) : g.doublonProbable ? (
+                        <span className="text-amber-600">
+                          Valide — mais doublon possible (même client, date et montant)
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600">Valide</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3">
+            <PrimaryButton
+              onClick={confirmerImport}
+              loading={importing}
+              disabled={nbValides === 0}
+            >
+              Importer {nbValides} vente{nbValides > 1 ? "s" : ""}
+            </PrimaryButton>
+          </div>
         </div>
       )}
     </div>
