@@ -74,7 +74,7 @@ export function ImportVentesSection() {
     if (groupes.length > 0) {
       setGroupes([]);
       setErreurGenerale(
-        "Le mode a changé : rechargez le fichier pour ré-analyser les ventes avec les nouvelles règles."
+        "Mode changé : rechargez le fichier."
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -436,45 +436,40 @@ export function ImportVentesSection() {
         Importer des ventes
       </h2>
       <p className="mt-1 text-sm text-onyx-500">
-        Pour enregistrer plusieurs ventes déjà réalisées en une seule fois.
-        Chaque ligne du fichier est un article vendu ; regroupez les
-        articles d&apos;une même vente avec le même &quot;N° de
-        vente&quot; dans la première colonne. Les articles doivent déjà
-        exister dans le catalogue — le client, lui, est créé
-        automatiquement s&apos;il n&apos;existe pas encore.
-        <br />
-        <strong>Une vente sans prix de vente reste en brouillon</strong> —
-        à confirmer et valider vous-même ensuite dans Ventes &gt; Ventes.
-        Une fois importée, chaque vente se consulte normalement dans
-        Ventes &gt; Ventes, avec son client et le détail de ses articles.
+        Une ligne = un article vendu. Regroupez les articles d&apos;une
+        même vente avec le même numéro en première colonne.
       </p>
 
-      <label className="mt-4 flex items-start gap-2.5 rounded-lg border border-onyx-200 bg-onyx-50 p-3.5">
-        <input
-          type="checkbox"
-          checked={modeHistorique}
-          onChange={(e) => setModeHistorique(e.target.checked)}
-          className="mt-0.5 h-4 w-4 rounded border-onyx-300"
-        />
-        <span className="text-sm text-onyx-700">
-          <span className="font-medium">
-            Ventes anciennes, antérieures au suivi de stock ici
-          </span>
-          <br />
-          <span className="text-xs text-onyx-500">
-            À cocher si le stock est vide ou n&apos;a pas de rapport avec ces
-            ventes. Elles seront directement validées pour le chiffre
-            d&apos;affaires et l&apos;historique,{" "}
-            <strong>sans toucher au stock actuel</strong>. Décochez pour des
-            ventes récentes, qui doivent réellement diminuer le stock
-            disponible.
-            <br />
-            Dans ce mode, la colonne &quot;Emplacement&quot; devient{" "}
-            <strong>facultative</strong> — laissez-la vide si vous ne vous
-            en souvenez plus (voir la vente &quot;V2&quot; du modèle).
-          </span>
-        </span>
-      </label>
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setModeHistorique(false)}
+          className={`rounded-lg border p-3.5 text-left transition-colors ${
+            !modeHistorique
+              ? "border-accent-400 bg-accent-50"
+              : "border-onyx-200 hover:bg-onyx-50"
+          }`}
+        >
+          <p className="text-sm font-medium text-onyx-800">Ventes récentes</p>
+          <p className="mt-0.5 text-xs text-onyx-500">
+            Diminue le stock actuel
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setModeHistorique(true)}
+          className={`rounded-lg border p-3.5 text-left transition-colors ${
+            modeHistorique
+              ? "border-accent-400 bg-accent-50"
+              : "border-onyx-200 hover:bg-onyx-50"
+          }`}
+        >
+          <p className="text-sm font-medium text-onyx-800">Ventes anciennes</p>
+          <p className="mt-0.5 text-xs text-onyx-500">
+            Ne touche pas au stock
+          </p>
+        </button>
+      </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <SecondaryButton onClick={telechargerModele} className="min-h-0 px-3 py-2 text-xs">
@@ -511,10 +506,7 @@ export function ImportVentesSection() {
         </div>
       )}
       {analyse && (
-        <p className="mt-3 text-sm text-onyx-400">
-          Analyse du fichier en cours (vérification des articles, des
-          emplacements et des doublons)...
-        </p>
+        <p className="mt-3 text-sm text-onyx-400">Analyse en cours...</p>
       )}
 
       {groupes.length > 0 && (
@@ -566,7 +558,7 @@ export function ImportVentesSection() {
                         <span className="text-red-500">{g.erreurs.join(" · ")}</span>
                       ) : g.doublonProbable ? (
                         <span className="text-amber-600">
-                          Valide — mais doublon possible (même client, date et montant)
+                          Doublon possible
                         </span>
                       ) : (
                         <span className="text-emerald-600">Valide</span>
