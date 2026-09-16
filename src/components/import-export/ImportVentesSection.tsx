@@ -115,6 +115,7 @@ export function ImportVentesSection() {
 
     const clientsTravail = [...clients];
     let reussies = 0;
+    let enBrouillon = 0;
     let echouees = 0;
     const erreursDetail: string[] = [];
 
@@ -246,6 +247,18 @@ export function ImportVentesSection() {
         continue;
       }
 
+      // Si au moins une ligne n'a pas de prix renseigné, la vente reste
+      // en brouillon — le prix doit d'abord être confirmé par
+      // quelqu'un, puis la vente validée manuellement depuis Ventes >
+      // Ventes. On ne valide automatiquement que si TOUS les prix sont
+      // connus.
+      const prixManquant = lignesResolues.some((l) => !l.prix || l.prix <= 0);
+
+      if (prixManquant) {
+        enBrouillon += 1;
+        continue;
+      }
+
       const { error: validationError } = await supabase.rpc("valider_vente", {
         p_vente_id: vente.id,
         p_utilisateur_id: user?.id ?? null,
@@ -255,7 +268,7 @@ export function ImportVentesSection() {
         erreursDetail.push(
           `Vente ${numero} créée en brouillon, mais non validée : ${validationError.message}`
         );
-        reussies += 1;
+        enBrouillon += 1;
         continue;
       }
 
@@ -275,9 +288,13 @@ export function ImportVentesSection() {
 
     setImporting(false);
     setResultat(
-      `${reussies} vente(s) importée(s) avec succès${
-        echouees > 0 ? `, ${echouees} échec(s)` : ""
-      }.${erreursDetail.length > 0 ? " Détail : " + erreursDetail.join(" | ") : ""}`
+      `${reussies} vente(s) validée(s)` +
+        (enBrouillon > 0
+          ? `, ${enBrouillon} laissée(s) en brouillon (prix manquant — à confirmer puis valider dans Ventes)`
+          : "") +
+        (echouees > 0 ? `, ${echouees} échec(s)` : "") +
+        "." +
+        (erreursDetail.length > 0 ? " Détail : " + erreursDetail.join(" | ") : "")
     );
     setLignes([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -301,6 +318,11 @@ export function ImportVentesSection() {
         vente&quot; dans la première colonne. Les articles doivent déjà
         exister et être en stock — le client, lui, est créé
         automatiquement s&apos;il n&apos;existe pas encore.
+        <br />
+        <strong>Une vente sans prix de vente reste en brouillon</strong> —
+        à confirmer et valider vous-même ensuite dans Ventes &gt; Ventes.
+        Seules les ventes avec tous leurs prix renseignés sont validées
+        automatiquement.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">

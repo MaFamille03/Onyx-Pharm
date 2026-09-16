@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Download, Package, ShoppingCart, Truck, Wallet, Users } from "lucide-react";
+import { Download, Package, ShoppingCart, Truck, Wallet, Users, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { exporterExcelMisEnForme, exporterExcelMisEnFormeMultiFeuilles } from "@/lib/excel";
-import { PrimaryButton } from "@/components/ui/Buttons";
+import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
+import { RapportPrintable } from "@/components/rapports/RapportPrintable";
 
 type Periode = "aujourdhui" | "semaine" | "mois" | "tout";
 type PeriodeFiltre = Periode | { debut: string; fin: string };
@@ -178,6 +179,7 @@ function RapportStock() {
     }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [impressionOuverte, setImpressionOuverte] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -269,6 +271,13 @@ function RapportStock() {
           <Download size={14} />
           Exporter Excel
         </PrimaryButton>
+        <SecondaryButton
+          onClick={() => setImpressionOuverte(true)}
+          className="ml-2 min-h-0 px-3 py-1.5 text-xs"
+        >
+          <Printer size={14} />
+          Exporter PDF
+        </SecondaryButton>
       </div>
 
       {loading ? (
@@ -305,6 +314,28 @@ function RapportStock() {
           </table>
         </div>
       )}
+
+      {impressionOuverte && (
+        <RapportPrintable
+          titre="Rapport de stock"
+          periodeLabel={`${lignes.length} article(s) actif(s)`}
+          colonnes={[
+            { label: "Article", cle: "designation" },
+            { label: "Catégorie", cle: "categorie" },
+            { label: "Total", cle: "total", align: "right" },
+            { label: "Seuil", cle: "seuil", align: "right" },
+          ]}
+          lignes={lignes.map((l) => ({
+            designation: l.designation,
+            categorie: l.categorie || "—",
+            total: l.total,
+            seuil: l.stockMinimum,
+          }))}
+          totalLabel="Total général"
+          totalValeur={lignes.reduce((s, l) => s + l.total, 0)}
+          onClose={() => setImpressionOuverte(false)}
+        />
+      )}
     </div>
   );
 }
@@ -315,6 +346,7 @@ function RapportVentes({ periode }: { periode: PeriodeFiltre }) {
     { reference: string; date_vente: string; montant_total: number; statut: string; clients: { nom: string } | null }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [impressionOuverte, setImpressionOuverte] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -368,6 +400,13 @@ function RapportVentes({ periode }: { periode: PeriodeFiltre }) {
           <Download size={14} />
           Exporter Excel
         </PrimaryButton>
+        <SecondaryButton
+          onClick={() => setImpressionOuverte(true)}
+          className="ml-2 min-h-0 px-3 py-1.5 text-xs"
+        >
+          <Printer size={14} />
+          Exporter PDF
+        </SecondaryButton>
       </div>
 
       {loading ? (
@@ -402,6 +441,30 @@ function RapportVentes({ periode }: { periode: PeriodeFiltre }) {
           </table>
         </div>
       )}
+
+      {impressionOuverte && (
+        <RapportPrintable
+          titre="Rapport des ventes"
+          periodeLabel={`${lignes.length} vente(s)`}
+          colonnes={[
+            { label: "Référence", cle: "reference" },
+            { label: "Date", cle: "date" },
+            { label: "Client", cle: "client" },
+            { label: "Montant", cle: "montant", align: "right" },
+            { label: "Statut", cle: "statut" },
+          ]}
+          lignes={lignes.map((l) => ({
+            reference: l.reference,
+            date: new Date(l.date_vente).toLocaleDateString("fr-FR"),
+            client: l.clients?.nom ?? "—",
+            montant: l.montant_total.toLocaleString("fr-FR"),
+            statut: l.statut,
+          }))}
+          totalLabel="Total"
+          totalValeur={`${total.toLocaleString("fr-FR")} FCFA`}
+          onClose={() => setImpressionOuverte(false)}
+        />
+      )}
     </div>
   );
 }
@@ -412,6 +475,7 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
     { code: string; date_arrivee: string; montant_achat_global: number | null; statut: string; fournisseurs: { nom: string } | null }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [impressionOuverte, setImpressionOuverte] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -465,6 +529,13 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
           <Download size={14} />
           Exporter Excel
         </PrimaryButton>
+        <SecondaryButton
+          onClick={() => setImpressionOuverte(true)}
+          className="ml-2 min-h-0 px-3 py-1.5 text-xs"
+        >
+          <Printer size={14} />
+          Exporter PDF
+        </SecondaryButton>
       </div>
 
       {loading ? (
@@ -503,6 +574,33 @@ function RapportConteneurs({ periode }: { periode: PeriodeFiltre }) {
           </table>
         </div>
       )}
+
+      {impressionOuverte && (
+        <RapportPrintable
+          titre="Rapport des commandes"
+          periodeLabel={`${lignes.length} commande(s)`}
+          colonnes={[
+            { label: "Code", cle: "code" },
+            { label: "Date", cle: "date" },
+            { label: "Fournisseur", cle: "fournisseur" },
+            { label: "Montant", cle: "montant", align: "right" },
+            { label: "Statut", cle: "statut" },
+          ]}
+          lignes={lignes.map((l) => ({
+            code: l.code,
+            date: new Date(l.date_arrivee).toLocaleDateString("fr-FR"),
+            fournisseur: l.fournisseurs?.nom ?? "—",
+            montant:
+              l.montant_achat_global !== null
+                ? l.montant_achat_global.toLocaleString("fr-FR")
+                : "—",
+            statut: l.statut,
+          }))}
+          totalLabel="Total"
+          totalValeur={`${total.toLocaleString("fr-FR")} FCFA`}
+          onClose={() => setImpressionOuverte(false)}
+        />
+      )}
     </div>
   );
 }
@@ -516,6 +614,7 @@ function RapportCaisse({ periode }: { periode: PeriodeFiltre }) {
     { reference: string; date_operation: string; montant: number; categorie: string | null; description: string | null }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [impressionOuverte, setImpressionOuverte] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -593,6 +692,13 @@ function RapportCaisse({ periode }: { periode: PeriodeFiltre }) {
           <Download size={14} />
           Exporter Excel
         </PrimaryButton>
+        <SecondaryButton
+          onClick={() => setImpressionOuverte(true)}
+          className="ml-2 min-h-0 px-3 py-1.5 text-xs"
+        >
+          <Printer size={14} />
+          Exporter PDF
+        </SecondaryButton>
       </div>
 
       {loading ? (
@@ -641,6 +747,39 @@ function RapportCaisse({ periode }: { periode: PeriodeFiltre }) {
           </div>
         </div>
       )}
+
+      {impressionOuverte && (
+        <RapportPrintable
+          titre="Rapport de caisse"
+          periodeLabel={`${encaissements.length} encaissement(s), ${decaissements.length} décaissement(s)`}
+          colonnes={[
+            { label: "Type", cle: "type" },
+            { label: "Référence", cle: "reference" },
+            { label: "Date", cle: "date" },
+            { label: "Description", cle: "description" },
+            { label: "Montant", cle: "montant", align: "right" },
+          ]}
+          lignes={[
+            ...encaissements.map((e) => ({
+              type: "Encaissement",
+              reference: e.reference,
+              date: new Date(e.date_operation).toLocaleDateString("fr-FR"),
+              description: e.description || "",
+              montant: e.montant.toLocaleString("fr-FR"),
+            })),
+            ...decaissements.map((d) => ({
+              type: "Décaissement",
+              reference: d.reference,
+              date: new Date(d.date_operation).toLocaleDateString("fr-FR"),
+              description: d.description || "",
+              montant: "-" + d.montant.toLocaleString("fr-FR"),
+            })),
+          ]}
+          totalLabel="Solde net (encaissements - décaissements)"
+          totalValeur={`${(totalEnc - totalDec).toLocaleString("fr-FR")} FCFA`}
+          onClose={() => setImpressionOuverte(false)}
+        />
+      )}
     </div>
   );
 }
@@ -654,12 +793,13 @@ function RapportTiers() {
     { reference: string; dette: number; fournisseur_id: string }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [impressionOuverte, setImpressionOuverte] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     const [creancesRes, dettesRes] = await Promise.all([
       supabase.from("v_creances_clients").select("reference, creance, client_id"),
-      supabase.from("v_dettes_fournisseurs").select("reference, dette, fournisseur_id"),
+      supabase.from("v_dettes_conteneurs").select("reference, dette, fournisseur_id"),
     ]);
     if (creancesRes.data) setCreances(creancesRes.data);
     if (dettesRes.data) setDettes(dettesRes.data);
@@ -702,6 +842,13 @@ function RapportTiers() {
           <Download size={14} />
           Exporter Excel
         </PrimaryButton>
+        <SecondaryButton
+          onClick={() => setImpressionOuverte(true)}
+          className="ml-2 min-h-0 px-3 py-1.5 text-xs"
+        >
+          <Printer size={14} />
+          Exporter PDF
+        </SecondaryButton>
       </div>
 
       {loading ? (
@@ -753,6 +900,33 @@ function RapportTiers() {
             )}
           </div>
         </div>
+      )}
+
+      {impressionOuverte && (
+        <RapportPrintable
+          titre="Créances et dettes"
+          periodeLabel={`${creances.length} créance(s), ${dettes.length} dette(s)`}
+          colonnes={[
+            { label: "Type", cle: "type" },
+            { label: "Référence", cle: "reference" },
+            { label: "Montant", cle: "montant", align: "right" },
+          ]}
+          lignes={[
+            ...creances.map((c) => ({
+              type: "Créance client",
+              reference: c.reference,
+              montant: c.creance.toLocaleString("fr-FR"),
+            })),
+            ...dettes.map((d) => ({
+              type: "Dette fournisseur",
+              reference: d.reference,
+              montant: d.dette.toLocaleString("fr-FR"),
+            })),
+          ]}
+          totalLabel="Créances - Dettes"
+          totalValeur={`${(totalCreances - totalDettes).toLocaleString("fr-FR")} FCFA`}
+          onClose={() => setImpressionOuverte(false)}
+        />
       )}
     </div>
   );
