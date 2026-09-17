@@ -31,6 +31,7 @@ type ArticleRow = {
   fournisseur_id: string | null;
   observations: string | null;
   categories: { nom: string } | null;
+  sous_categories: { nom: string } | null;
   fournisseurs: { nom: string } | null;
   stocks: {
     quantite: number;
@@ -88,7 +89,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       supabase
         .from("articles")
         .select(
-          "id, designation, marque, prix_vente_conseille, stock_minimum, numero_lot, date_expiration, statut, categorie_id, sous_categorie_id, fournisseur_id, observations, categories(nom), fournisseurs(nom), stocks(quantite, emplacement_id, emplacements(nom), conteneurs(code))"
+          "id, designation, marque, prix_vente_conseille, stock_minimum, numero_lot, date_expiration, statut, categorie_id, sous_categorie_id, fournisseur_id, observations, categories(nom), sous_categories(nom), fournisseurs(nom), stocks(quantite, emplacement_id, emplacements(nom), conteneurs(code))"
         )
         .order("designation"),
       supabase
@@ -441,7 +442,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                     <th className="px-4 py-3" />
                     <th className="px-4 py-3">Désignation</th>
                     <th className="px-4 py-3">Catégorie</th>
-                    <th className="px-4 py-3">Fournisseur</th>
+                    <th className="px-4 py-3">Sous-catégorie</th>
                     <th className="px-4 py-3 text-right">Prix vente référence</th>
                     <th className="px-4 py-3 text-right">Stock (cliquer pour corriger)</th>
                     <th className="px-4 py-3">Statut</th>
@@ -500,7 +501,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                             {a.categories?.nom || "—"}
                           </td>
                           <td className="px-4 py-3 text-onyx-500">
-                            {a.fournisseurs?.nom || "—"}
+                            {a.sous_categories?.nom || "—"}
                           </td>
                           <td className="px-4 py-3 text-right text-onyx-600">
                             {a.prix_vente_conseille.toLocaleString("fr-FR")}
