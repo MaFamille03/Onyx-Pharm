@@ -754,6 +754,7 @@ function VenteDetail({
   );
   const [annulationModalOpen, setAnnulationModalOpen] = useState(false);
   const [impressionOpen, setImpressionOpen] = useState(false);
+  const [proformaOpen, setProformaOpen] = useState(false);
   const [suppressionBrouillonOpen, setSuppressionBrouillonOpen] = useState(false);
   const [reouvertureOpen, setReouvertureOpen] = useState(false);
   const [suppressionValideeOpen, setSuppressionValideeOpen] = useState(false);
@@ -1005,6 +1006,10 @@ function VenteDetail({
               Imprimer
             </SecondaryButton>
           )}
+          <SecondaryButton onClick={() => setProformaOpen(true)}>
+            <Printer size={16} />
+            Télécharger le proforma (papier à en-tête)
+          </SecondaryButton>
           {vente.statut !== "Brouillon" && vente.statut !== "Annulé" && (
             <SecondaryButton onClick={() => setReouvertureOpen(true)}>
               <Pencil size={16} />
@@ -1274,6 +1279,25 @@ function VenteDetail({
           montantTotal={vente.montant_total}
           montantPaye={vente.montant_paye}
           onClose={() => setImpressionOpen(false)}
+        />
+      )}
+
+      {proformaOpen && (
+        <DocumentImprimable
+          typeDocument="Facture Proforma"
+          reference={vente.reference}
+          date={vente.date_vente}
+          tiersLabel="Client"
+          tiersNom={vente.clients?.nom}
+          lignes={lignes.map((l) => ({
+            designation: l.articles?.designation ?? "",
+            quantite: l.quantite,
+            prixUnitaire: l.prix_vente_reel,
+            montant: l.montant_ligne,
+          }))}
+          montantTotal={vente.montant_total}
+          papierEntete
+          onClose={() => setProformaOpen(false)}
         />
       )}
     </div>

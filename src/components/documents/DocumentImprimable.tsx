@@ -19,6 +19,7 @@ export function DocumentImprimable({
   lignes,
   montantTotal,
   montantPaye,
+  papierEntete,
   onClose,
 }: {
   typeDocument: string;
@@ -29,6 +30,9 @@ export function DocumentImprimable({
   lignes: LigneDocument[];
   montantTotal: number;
   montantPaye?: number;
+  /** Si vrai, laisse la place vide en haut pour un papier à en-tête déjà
+   * imprimé (n'affiche pas notre propre logo/bloc d'identité). */
+  papierEntete?: boolean;
   onClose: () => void;
 }) {
   return (
@@ -55,30 +59,40 @@ export function DocumentImprimable({
         </div>
       </div>
 
-      <div className="zone-impression mx-auto max-w-2xl bg-white p-8 sm:p-10">
-        <div className="flex items-start justify-between border-b border-onyx-200 pb-6">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white p-1">
-                <Image
-                  src="/onyx-pharm-icon.png"
-                  alt="ONYX PHARM"
-                  width={36}
-                  height={36}
-                  className="h-full w-full object-contain"
-                />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-onyx-900">
-                  ONYX PHARM
-                </p>
-                <p className="text-xs text-onyx-400">
-                  Équipements médicaux
-                </p>
+      <div
+        className={`zone-impression mx-auto max-w-2xl bg-white p-8 sm:p-10 ${
+          papierEntete ? "pt-32 sm:pt-40" : ""
+        }`}
+      >
+        <div
+          className={`flex items-start justify-between border-b border-onyx-200 pb-6 ${
+            papierEntete ? "!border-b-0 !pb-0" : ""
+          }`}
+        >
+          {!papierEntete && (
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white p-1">
+                  <Image
+                    src="/onyx-pharm-icon.png"
+                    alt="ONYX PHARM"
+                    width={36}
+                    height={36}
+                    className="h-full w-full object-contain"
+                  />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-onyx-900">
+                    ONYX PHARM
+                  </p>
+                  <p className="text-xs text-onyx-400">
+                    Équipements médicaux
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="text-right">
+          )}
+          <div className={papierEntete ? "ml-auto text-right" : "text-right"}>
             <p className="text-lg font-semibold uppercase tracking-wide text-onyx-900">
               {typeDocument}
             </p>
@@ -92,6 +106,7 @@ export function DocumentImprimable({
             </p>
           </div>
         </div>
+        {papierEntete && <div className="mt-6 border-b border-onyx-200" />}
 
         {tiersNom && (
           <div className="mt-6">
