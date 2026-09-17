@@ -394,18 +394,18 @@ export function ImportExportManager() {
         );
         if (!emplacementId) continue;
 
-        const { error: stockErr } = await supabase.from("stocks").upsert(
+        const { error: stockErr } = await supabase.rpc(
+          "ajouter_quantite_stock",
           {
-            article_id: article.id,
-            emplacement_id: emplacementId,
-            conteneur_id: stockInitialId,
-            quantite,
-          },
-          { onConflict: "article_id,emplacement_id,conteneur_id" }
+            p_article_id: article.id,
+            p_emplacement_id: emplacementId,
+            p_conteneur_id: stockInitialId,
+            p_quantite: quantite,
+          }
         );
         if (stockErr) {
           logSupabaseError(
-            { table: "stocks", operation: "upsert (import Excel)" },
+            { table: "stocks", operation: "rpc ajouter_quantite_stock (import Excel)" },
             stockErr,
             ""
           );

@@ -67,6 +67,9 @@ export function ArticleFormModal({
   } = useReferenceData();
 
   const [form, setForm] = useState(initialValues);
+  const [baselineStock, setBaselineStock] = useState<Record<string, number>>(
+    stockParEmplacement ?? {}
+  );
   const [stockInitial, setStockInitial] = useState<Record<string, string>>(
     () => {
       const init: Record<string, string> = {};
@@ -78,8 +81,9 @@ export function ArticleFormModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [articleExistantDetecte, setArticleExistantDetecte] = useState(false);
 
-  const isEdition = Boolean(initialValues.id);
+  const isEdition = Boolean(form.id);
   const [expirationApplicable, setExpirationApplicable] = useState(
     Boolean(initialValues.date_expiration)
   );
@@ -91,6 +95,61 @@ export function ArticleFormModal({
   );
 
   const emplacementsActifs = emplacements.filter((e) => e.actif);
+
+  // En création uniquement : si le nom tapé correspond déjà à un
+  // article existant, on rapatrie toutes ses informations dans ce
+  // formulaire — pour éviter de créer un doublon sans le savoir, et
+  // permettre de continuer à le modifier directement ici.
+  async function detecterArticleExistant() {
+    if (isEdition || !form.designation.trim()) {
+      setArticleExistantDetecte(false);
+      return;
+    }
+    const { data } = await supabase
+      .from("articles")
+      .select(
+        "id, designation, categorie_id, sous_categorie_id, marque, fournisseur_id, stock_minimum, prix_vente_conseille, numero_lot, date_expiration, statut, observations"
+      )
+      .ilike("designation", form.designation.trim())
+      .limit(1)
+      .maybeSingle();
+
+    if (data) {
+      setForm({
+        id: data.id,
+        designation: data.designation,
+        categorie_id: data.categorie_id ?? "",
+        sous_categorie_id: data.sous_categorie_id ?? "",
+        marque: data.marque ?? "",
+        fournisseur_id: data.fournisseur_id ?? "",
+        stock_minimum: String(data.stock_minimum),
+        prix_vente_conseille: String(data.prix_vente_conseille),
+        numero_lot: data.numero_lot ?? "",
+        date_expiration: data.date_expiration ?? "",
+        statut: data.statut,
+        observations: data.observations ?? "",
+      });
+      setExpirationApplicable(Boolean(data.date_expiration));
+      setArticleExistantDetecte(true);
+
+      const { data: stocks } = await supabase
+        .from("stocks")
+        .select("emplacement_id, quantite")
+        .eq("article_id", data.id);
+      const parEmpl: Record<string, number> = {};
+      for (const s of stocks ?? []) {
+        parEmpl[s.emplacement_id] = (parEmpl[s.emplacement_id] ?? 0) + s.quantite;
+      }
+      const init: Record<string, string> = {};
+      for (const [id, qte] of Object.entries(parEmpl)) {
+        if (qte > 0) init[id] = String(qte);
+      }
+      setStockInitial(init);
+      setBaselineStock(parEmpl);
+    } else {
+      setArticleExistantDetecte(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -120,11 +179,11 @@ export function ArticleFormModal({
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (isEdition && initialValues.id) {
+    if (isEdition && form.id) {
       const { error } = await supabase
         .from("articles")
         .update(payload)
-        .eq("id", initialValues.id);
+        .eq("id", form.id);
       if (error) {
         setError(
           logSupabaseError(
@@ -143,11 +202,11 @@ export function ArticleFormModal({
       // exactement la même logique que "Corriger le stock" depuis la
       // liste, désormais réunie ici, au même endroit que le reste.
       const tousEmplacements = new Set([
-        ...Object.keys(stockParEmplacement ?? {}),
+        ...Object.keys(baselineStock),
         ...Object.keys(stockInitial),
       ]);
       for (const emplacementId of Array.from(tousEmplacements)) {
-        const avant = stockParEmplacement?.[emplacementId] ?? 0;
+        const avant = baselineStock[emplacementId] ?? 0;
         const apres = Number(stockInitial[emplacementId] || 0);
         const delta = apres - avant;
         if (delta === 0) continue;
@@ -156,7 +215,7 @@ export function ArticleFormModal({
           const { data: repartition, error: fifoError } = await supabase.rpc(
             "consommer_stock_fifo",
             {
-              p_article_id: initialValues.id,
+              p_article_id: form.id,
               p_emplacement_id: emplacementId,
               p_quantite: -delta,
               p_conteneur_id: null,
@@ -175,7 +234,7 @@ export function ArticleFormModal({
           }
           for (const part of repartition ?? []) {
             await supabase.from("mouvements_stock").insert({
-              article_id: initialValues.id,
+              article_id: form.id,
               emplacement_id: emplacementId,
               type: "autre_sortie",
               quantite: -part.quantite,
@@ -187,17 +246,28 @@ export function ArticleFormModal({
         } else {
           const stockInitialId = await getStockInitialId(supabase);
           if (stockInitialId) {
-            await supabase.from("stocks").upsert(
+            const { error: ajoutError } = await supabase.rpc(
+              "ajouter_quantite_stock",
               {
-                article_id: initialValues.id,
-                emplacement_id: emplacementId,
-                conteneur_id: stockInitialId,
-                quantite: delta,
-              },
-              { onConflict: "article_id,emplacement_id,conteneur_id" }
+                p_article_id: form.id,
+                p_emplacement_id: emplacementId,
+                p_conteneur_id: stockInitialId,
+                p_quantite: delta,
+              }
             );
+            if (ajoutError) {
+              setError(
+                logSupabaseError(
+                  { table: "stocks", operation: "rpc ajouter_quantite_stock" },
+                  ajoutError,
+                  "Article enregistré, mais une correction de stock a échoué."
+                )
+              );
+              setSaving(false);
+              return;
+            }
             await supabase.from("mouvements_stock").insert({
-              article_id: initialValues.id,
+              article_id: form.id,
               emplacement_id: emplacementId,
               type: "autre_entree",
               quantite: delta,
@@ -238,19 +308,19 @@ export function ArticleFormModal({
         for (const [emplacementId, valeur] of entrees) {
           const quantite = Number(valeur);
 
-          const { error: stockError } = await supabase.from("stocks").upsert(
+          const { error: stockError } = await supabase.rpc(
+            "ajouter_quantite_stock",
             {
-              article_id: created.id,
-              emplacement_id: emplacementId,
-              conteneur_id: stockInitialId,
-              quantite,
-            },
-            { onConflict: "article_id,emplacement_id,conteneur_id" }
+              p_article_id: created.id,
+              p_emplacement_id: emplacementId,
+              p_conteneur_id: stockInitialId,
+              p_quantite: quantite,
+            }
           );
 
           if (stockError) {
             logSupabaseError(
-              { table: "stocks", operation: "upsert (stock initial)" },
+              { table: "stocks", operation: "rpc ajouter_quantite_stock (stock initial)" },
               stockError,
               ""
             );
@@ -299,8 +369,17 @@ export function ArticleFormModal({
             required
             value={form.designation}
             onChange={(e) => setForm({ ...form, designation: e.target.value })}
+            onBlur={detecterArticleExistant}
             placeholder="Ex : Tensiomètre électronique X200"
           />
+          {articleExistantDetecte && (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <InlineBanner
+                type="success"
+                message='Un article portant ce nom existe déjà — ses informations ont été reprises ci-dessous. Continuez pour le modifier, ou changez le nom pour en créer un nouveau.'
+              />
+            </div>
+          )}
 
           <FormField
             id="marque"
@@ -461,7 +540,7 @@ export function ArticleFormModal({
           placeholder="Notes internes (optionnel)"
         />
 
-        {(!isEdition || stockParEmplacement !== undefined) && (
+        {(!isEdition || stockParEmplacement !== undefined || articleExistantDetecte) && (
           <div className="rounded-lg border border-onyx-100 bg-onyx-50/50 p-4">
             <p className="text-sm font-medium text-onyx-700">
               {isEdition ? "Stock par emplacement" : "Stock initial (optionnel)"}
