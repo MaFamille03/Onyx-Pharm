@@ -22,18 +22,22 @@ import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { ImportVentesSection } from "@/components/import-export/ImportVentesSection";
 import { ImportTiersSection } from "@/components/import-export/ImportTiersSection";
 
-// Colonnes fixes du modèle — les emplacements s'ajoutent dynamiquement
-// à la fin, une colonne par emplacement actif du site, pour que la
-// quantité de chaque article se saisisse directement par emplacement,
-// sur une seule ligne.
-const COLONNES_FIXES = [
+// Colonnes fixes du modèle. Les emplacements s'insèrent dynamiquement
+// entre les deux groupes (une colonne par emplacement actif du site),
+// suivis de "Stock Disponible" — une colonne de contrôle qui doit
+// correspondre à la somme des emplacements, pour repérer une erreur de
+// saisie avant même d'importer.
+const COLONNES_AVANT_EMPLACEMENT = [
   "Désignation",
   "Catégorie",
   "Sous-catégorie",
   "Marque",
   "Fournisseur",
-  "Stock minimum",
+  "Stock Alerte",
   "Prix de vente conseillé",
+];
+const COLONNES_APRES_EMPLACEMENT = [
+  "Stock Disponible",
   "Numéro de lot",
   "Date d'expiration",
   "Statut",
@@ -105,15 +109,19 @@ export function ImportExportManager() {
 
   function telechargerModele() {
     const emplacementsActifs = emplacements.filter((e) => e.actif);
-    const colonnes = [...COLONNES_FIXES, ...emplacementsActifs.map((e) => e.nom)];
+    const colonnes = [
+      ...COLONNES_AVANT_EMPLACEMENT,
+      ...emplacementsActifs.map((e) => e.nom),
+      ...COLONNES_APRES_EMPLACEMENT,
+    ];
 
     const ligneExemple: Record<string, string | number> = {
       Désignation: "Table d'opération",
-      Catégorie: "Chirurgie",
-      "Sous-catégorie": "",
+      Catégorie: "Equipement",
+      "Sous-catégorie": "Chirurgie",
       Marque: "",
-      Fournisseur: "",
-      "Stock minimum": 2,
+      Fournisseur: "RAINY",
+      "Stock Alerte": 2,
       "Prix de vente conseillé": 500000,
       "Numéro de lot": "",
       "Date d'expiration": "",
@@ -121,11 +129,17 @@ export function ImportExportManager() {
       Observations: "",
     };
     // Une colonne par emplacement : la quantité de cet article s'y
-    // saisit directement, sur cette seule ligne — 5 à l'Entrepôt et 3
-    // ailleurs, par exemple, si le site a plusieurs emplacements.
+    // saisit directement, sur cette seule ligne. "Stock Disponible" est
+    // une colonne de contrôle, facultative — si elle est remplie, elle
+    // doit correspondre à la somme des emplacements ; sinon l'import
+    // signale l'écart avant de continuer.
+    let total = 0;
     emplacementsActifs.forEach((e, i) => {
-      ligneExemple[e.nom] = i === 0 ? 5 : i === 1 ? 3 : 0;
+      const qte = i === 0 ? 5 : i === 1 ? 3 : 0;
+      ligneExemple[e.nom] = qte;
+      total += qte;
     });
+    ligneExemple["Stock Disponible"] = total;
 
     exporterExcelMisEnForme("Modèle_Articles_Onyx_Pharm", "Modèle", colonnes, [
       ligneExemple,
@@ -142,7 +156,7 @@ export function ImportExportManager() {
     return brutes.map((row, i) => {
       const erreurs: string[] = [];
       const designation = String(row["Désignation"] ?? "").trim();
-      const stockMin = row["Stock minimum"];
+      const stockAlerte = row["Stock Alerte"];
       const prixVente = row["Prix de vente conseillé"];
       const dateExpiration = String(row["Date d'expiration"] ?? "").trim();
 
@@ -155,8 +169,8 @@ export function ImportExportManager() {
       }
       if (designation) designationsVues.add(normaliser(designation));
 
-      if (stockMin !== "" && stockMin !== undefined && Number.isNaN(Number(stockMin))) {
-        erreurs.push("Stock minimum invalide");
+      if (stockAlerte !== "" && stockAlerte !== undefined && Number.isNaN(Number(stockAlerte))) {
+        erreurs.push("Stock Alerte invalide");
       }
       if (prixVente !== "" && prixVente !== undefined && Number.isNaN(Number(prixVente))) {
         erreurs.push("Prix de vente invalide");
@@ -169,12 +183,32 @@ export function ImportExportManager() {
       // nombre positif ou vide — jamais bloquant si absente (0 par
       // défaut), mais une valeur incorrecte (texte, négatif) est
       // signalée précisément, avec le nom de l'emplacement concerné.
+      let sommeEmplacements = 0;
       for (const emp of emplacementsActifs) {
         const valeur = trouverValeurColonne(row, emp.nom);
         if (valeur === undefined || valeur === "") continue;
         const nombre = Number(valeur);
         if (Number.isNaN(nombre) || nombre < 0) {
           erreurs.push(`Quantité invalide pour "${emp.nom}"`);
+        } else {
+          sommeEmplacements += nombre;
+        }
+      }
+
+      // "Stock Disponible" est une colonne de contrôle facultative :
+      // si elle est remplie, elle doit correspondre exactement à la
+      // somme des emplacements — sinon, c'est très probablement une
+      // erreur de saisie quelque part, signalée avant d'importer quoi
+      // que ce soit.
+      const stockDisponible = row["Stock Disponible"];
+      if (stockDisponible !== "" && stockDisponible !== undefined) {
+        const attendu = Number(stockDisponible);
+        if (Number.isNaN(attendu)) {
+          erreurs.push('"Stock Disponible" invalide');
+        } else if (attendu !== sommeEmplacements) {
+          erreurs.push(
+            `"Stock Disponible" (${attendu}) ne correspond pas à la somme des emplacements (${sommeEmplacements})`
+          );
         }
       }
 
@@ -302,7 +336,7 @@ export function ImportExportManager() {
           sous_categorie_id: sousCategorieId,
           marque: String(row["Marque"] ?? "").trim() || null,
           fournisseur_id: fournisseurId,
-          stock_minimum: Number(row["Stock minimum"]) || 0,
+          stock_minimum: Number(row["Stock Alerte"]) || 0,
           prix_vente_conseille: Number(row["Prix de vente conseillé"]) || 0,
           numero_lot: String(row["Numéro de lot"] ?? "").trim() || null,
           date_expiration: String(row["Date d'expiration"] ?? "").trim() || null,
@@ -409,7 +443,7 @@ export function ImportExportManager() {
                   Désignation: r.designation,
                   Marque: r.marque,
                   "Prix de vente référence": r.prix_vente_conseille,
-                  "Stock minimum": r.stock_minimum,
+                  "Stock Alerte": r.stock_minimum,
                   Statut: r.statut,
                 })
               )
@@ -524,9 +558,11 @@ export function ImportExportManager() {
           Importer des articles
         </h2>
         <p className="mt-1 text-xs text-onyx-400">
-          Une ligne par article. Chaque emplacement de votre site a sa
-          propre colonne — indiquez-y directement la quantité présente
-          à cet endroit (laissez vide s&apos;il n&apos;y en a pas).
+          Une ligne par article. Chaque emplacement a sa propre colonne —
+          indiquez-y la quantité présente à cet endroit. &quot;Stock
+          Disponible&quot; est facultatif : si rempli, il doit
+          correspondre à la somme des emplacements, sinon l&apos;écart
+          est signalé avant import.
         </p>
 
         <div className="mt-3 flex flex-wrap gap-2">
