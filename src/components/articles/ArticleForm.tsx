@@ -45,13 +45,14 @@ export const EMPTY_ARTICLE_FORM: ArticleFormValues = {
 
 export function ArticleFormModal({
   initialValues,
-  stockDisponible,
+  stockParEmplacement,
   onClose,
   onSaved,
 }: {
   initialValues: ArticleFormValues;
-  /** Quantité totale actuellement en stock (lecture seule, informatif). */
-  stockDisponible?: number;
+  /** Quantité actuelle par emplacement (id → quantité), pour pré-remplir
+   * et permettre la correction directement dans ce formulaire. */
+  stockParEmplacement?: Record<string, number>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -67,7 +68,13 @@ export function ArticleFormModal({
 
   const [form, setForm] = useState(initialValues);
   const [stockInitial, setStockInitial] = useState<Record<string, string>>(
-    {}
+    () => {
+      const init: Record<string, string> = {};
+      for (const [id, qte] of Object.entries(stockParEmplacement ?? {})) {
+        if (qte > 0) init[id] = String(qte);
+      }
+      return init;
+    }
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +135,78 @@ export function ArticleFormModal({
         );
         setSaving(false);
         return;
+      }
+
+      // Corrige le stock par emplacement : une baisse consomme en FIFO
+      // (les commandes les plus anciennes en premier), une hausse
+      // s'ajoute au stock non rattaché à une commande précise —
+      // exactement la même logique que "Corriger le stock" depuis la
+      // liste, désormais réunie ici, au même endroit que le reste.
+      const tousEmplacements = new Set([
+        ...Object.keys(stockParEmplacement ?? {}),
+        ...Object.keys(stockInitial),
+      ]);
+      for (const emplacementId of Array.from(tousEmplacements)) {
+        const avant = stockParEmplacement?.[emplacementId] ?? 0;
+        const apres = Number(stockInitial[emplacementId] || 0);
+        const delta = apres - avant;
+        if (delta === 0) continue;
+
+        if (delta < 0) {
+          const { data: repartition, error: fifoError } = await supabase.rpc(
+            "consommer_stock_fifo",
+            {
+              p_article_id: initialValues.id,
+              p_emplacement_id: emplacementId,
+              p_quantite: -delta,
+              p_conteneur_id: null,
+            }
+          );
+          if (fifoError) {
+            setError(
+              logSupabaseError(
+                { table: "stocks", operation: "rpc consommer_stock_fifo" },
+                fifoError,
+                "Article enregistré, mais une correction de stock a échoué (quantité insuffisante ?)."
+              )
+            );
+            setSaving(false);
+            return;
+          }
+          for (const part of repartition ?? []) {
+            await supabase.from("mouvements_stock").insert({
+              article_id: initialValues.id,
+              emplacement_id: emplacementId,
+              type: "autre_sortie",
+              quantite: -part.quantite,
+              document_type: "ajustement_manuel",
+              observation: "Correction depuis la fiche article",
+              created_by: user?.id ?? null,
+            });
+          }
+        } else {
+          const stockInitialId = await getStockInitialId(supabase);
+          if (stockInitialId) {
+            await supabase.from("stocks").upsert(
+              {
+                article_id: initialValues.id,
+                emplacement_id: emplacementId,
+                conteneur_id: stockInitialId,
+                quantite: delta,
+              },
+              { onConflict: "article_id,emplacement_id,conteneur_id" }
+            );
+            await supabase.from("mouvements_stock").insert({
+              article_id: initialValues.id,
+              emplacement_id: emplacementId,
+              type: "autre_entree",
+              quantite: delta,
+              document_type: "ajustement_manuel",
+              observation: "Correction depuis la fiche article",
+              created_by: user?.id ?? null,
+            });
+          }
+        }
       }
     } else {
       const { data: created, error } = await supabase
@@ -330,20 +409,6 @@ export function ArticleFormModal({
             }
             placeholder="0"
           />
-          {stockDisponible !== undefined && (
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-                Stock disponible
-              </label>
-              <div className="flex h-[46px] items-center rounded-lg border border-onyx-100 bg-onyx-50 px-3.5 text-[15px] text-onyx-500">
-                {stockDisponible}
-              </div>
-              <p className="mt-1 text-xs text-onyx-400">
-                Quantité actuellement en stock (tous emplacements et
-                commandes confondues). Se corrige depuis Stock, pas ici.
-              </p>
-            </div>
-          )}
           <FormField
             id="numero-lot"
             label="Numéro de lot"
@@ -396,14 +461,15 @@ export function ArticleFormModal({
           placeholder="Notes internes (optionnel)"
         />
 
-        {!isEdition && (
+        {(!isEdition || stockParEmplacement !== undefined) && (
           <div className="rounded-lg border border-onyx-100 bg-onyx-50/50 p-4">
             <p className="text-sm font-medium text-onyx-700">
-              Stock initial (optionnel)
+              {isEdition ? "Stock par emplacement" : "Stock initial (optionnel)"}
             </p>
             <p className="mt-0.5 text-xs text-onyx-400">
-              Renseignez la quantité de départ par emplacement, si vous en
-              avez déjà en stock.
+              {isEdition
+                ? "Corrigez directement une quantité mal saisie. Une baisse retire en priorité des commandes les plus anciennes ; une hausse s'ajoute au stock non rattaché à une commande précise."
+                : "Renseignez la quantité de départ par emplacement, si vous en avez déjà en stock."}
             </p>
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {emplacementsActifs.map((empl: RefEmplacement) => (

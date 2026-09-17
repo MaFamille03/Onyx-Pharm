@@ -60,6 +60,7 @@ export function ImportExportManager() {
   const [lignes, setLignes] = useState<LigneImport[]>([]);
   const [colonnesEmplacementFichier, setColonnesEmplacementFichier] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  const [progression, setProgression] = useState({ actuel: 0, total: 0 });
   const [resultat, setResultat] = useState<string | null>(null);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -267,6 +268,7 @@ export function ImportExportManager() {
     if (valides.length === 0) return;
 
     setImporting(true);
+    setProgression({ actuel: 0, total: valides.length });
     setErreurGenerale(null);
 
     const {
@@ -286,7 +288,8 @@ export function ImportExportManager() {
     let echouees = 0;
     let totalQuantiteImportee = 0;
 
-    for (const ligne of valides) {
+    for (const [indexBoucle, ligne] of Array.from(valides.entries())) {
+      setProgression({ actuel: indexBoucle + 1, total: valides.length });
       const row = ligne.data;
       const designation = String(row["Désignation"]).trim();
 
@@ -694,6 +697,24 @@ export function ImportExportManager() {
               >
                 Importer {nbValides} article{nbValides > 1 ? "s" : ""}
               </PrimaryButton>
+              {importing && progression.total > 0 && (
+                <div className="mt-3">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-onyx-100">
+                    <div
+                      className="h-full rounded-full bg-accent-500 transition-all duration-200"
+                      style={{
+                        width: `${Math.round(
+                          (progression.actuel / progression.total) * 100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-xs text-onyx-400">
+                    {progression.actuel} / {progression.total} traité
+                    {progression.actuel > 1 ? "s" : ""}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

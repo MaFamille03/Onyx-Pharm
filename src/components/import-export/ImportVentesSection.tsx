@@ -62,6 +62,7 @@ export function ImportVentesSection() {
   const [analyse, setAnalyse] = useState(false);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [progression, setProgression] = useState({ actuel: 0, total: 0 });
   const [resultat, setResultat] = useState<string | null>(null);
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
@@ -271,6 +272,7 @@ export function ImportVentesSection() {
 
   async function confirmerImport() {
     setImporting(true);
+    setProgression({ actuel: 0, total: groupes.length });
     setErreurGenerale(null);
 
     const {
@@ -284,6 +286,7 @@ export function ImportVentesSection() {
     const erreursDetail: string[] = [];
 
     for (const groupe of groupes) {
+      setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
       if (!groupe.valide) {
         echouees += 1;
         continue;
@@ -578,6 +581,24 @@ export function ImportVentesSection() {
             >
               Importer {nbValides} vente{nbValides > 1 ? "s" : ""}
             </PrimaryButton>
+            {importing && progression.total > 0 && (
+              <div className="mt-3">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-onyx-100">
+                  <div
+                    className="h-full rounded-full bg-accent-500 transition-all duration-200"
+                    style={{
+                      width: `${Math.round(
+                        (progression.actuel / progression.total) * 100
+                      )}%`,
+                    }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-onyx-400">
+                  {progression.actuel} / {progression.total} traitée
+                  {progression.actuel > 1 ? "s" : ""}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}

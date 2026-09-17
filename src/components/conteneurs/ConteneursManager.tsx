@@ -28,27 +28,33 @@ type ConteneurRow = {
   fournisseurs: { nom: string } | null;
 };
 
-const COLONNES_MODELE = [
+// Colonnes fixes du modèle de commande — les emplacements s'ajoutent
+// dynamiquement entre les deux groupes, une colonne par emplacement
+// actif, exactement comme pour le modèle d'import d'articles.
+const COLONNES_AVANT_EMPLACEMENT = [
   "Désignation",
   "Catégorie",
   "Sous-catégorie",
   "Marque",
-  "Fournisseur",
+  "Prix d'achat unitaire (FCFA)",
   "Prix de vente conseillé",
+];
+const COLONNES_APRES_EMPLACEMENT = [
+  "Quantité totale",
   "Date d'expiration",
   "Statut",
   "Observations",
-  "Quantité",
-  "Emplacement",
 ];
 
-type ArticleOption = { id: string; designation: string };
+type ArticleOption = { id: string; designation: string; prix_vente_conseille: number };
 
 type LigneManuelle = {
   article_id: string;
   designation: string;
   quantite: string;
   emplacement_id: string;
+  prixAchatUnitaire: string;
+  prixVente: string;
 };
 
 type LigneImportee = {
@@ -219,7 +225,7 @@ function ListeConteneurs({
 
 export function NouveauConteneur({ onDone }: { onDone: () => void }) {
   const supabase = createClient();
-  const { emplacements, categories, sousCategories, fournisseurs, statutsArticle } =
+  const { emplacements, categories, sousCategories, statutsArticle } =
     useReferenceData();
   const emplacementsActifs = emplacements.filter((e) => e.actif);
 
@@ -227,21 +233,25 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
   const [fournisseurId, setFournisseurId] = useState("");
   const [dateArrivee, setDateArrivee] = useState(new Date().toISOString().slice(0, 10));
   const [montant, setMontant] = useState("");
+  const [tauxChange, setTauxChange] = useState("");
+  const [coefficientMarge, setCoefficientMarge] = useState("");
   const [observation, setObservation] = useState("");
 
   const [articlesOptions, setArticlesOptions] = useState<ArticleOption[]>([]);
   const [lignesManuelles, setLignesManuelles] = useState<LigneManuelle[]>([]);
 
   const [lignesImportees, setLignesImportees] = useState<LigneImportee[]>([]);
+  const [colonnesEmplacementFichier, setColonnesEmplacementFichier] = useState<string[]>([]);
   const [fileInputKey, setFileInputKey] = useState(0);
 
   const [saving, setSaving] = useState(false);
+  const [progression, setProgression] = useState({ actuel: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
       .from("articles")
-      .select("id, designation")
+      .select("id, designation, prix_vente_conseille")
       .order("designation")
       .then(({ data }) => {
         if (data) setArticlesOptions(data as ArticleOption[]);
@@ -258,7 +268,14 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
   function ajouterLigneManuelle() {
     setLignesManuelles([
       ...lignesManuelles,
-      { article_id: "", designation: "", quantite: "1", emplacement_id: emplacementsActifs[0]?.id ?? "" },
+      {
+        article_id: "",
+        designation: "",
+        quantite: "1",
+        emplacement_id: emplacementsActifs[0]?.id ?? "",
+        prixAchatUnitaire: "",
+        prixVente: "",
+      },
     ]);
   }
 
@@ -272,39 +289,99 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
 
   function choisirArticleManuel(index: number, articleId: string) {
     const article = articlesOptions.find((a) => a.id === articleId);
-    majLigneManuelle(index, { article_id: articleId, designation: article?.designation ?? "" });
+    majLigneManuelle(index, {
+      article_id: articleId,
+      designation: article?.designation ?? "",
+      prixVente: article?.prix_vente_conseille ? String(article.prix_vente_conseille) : "",
+    });
   }
 
   function telechargerModele() {
-    exporterExcelMisEnForme(
-      "Modèle_Commande_Onyx_Pharm",
-      "Modèle",
-      COLONNES_MODELE,
-      []
-    );
+    const emplacementsActifsModele = emplacements.filter((e) => e.actif);
+    const colonnes = [
+      ...COLONNES_AVANT_EMPLACEMENT,
+      ...emplacementsActifsModele.map((e) => e.nom),
+      ...COLONNES_APRES_EMPLACEMENT,
+    ];
+
+    // Exemple fidèle à une vraie facture fournisseur : la Boîte de
+    // sécurité (0,7$ x 700 = 490 FCFA/unité, revendue 1500).
+    const ligneExemple: Record<string, string | number> = {
+      Désignation: "Boîte de sécurité",
+      Catégorie: "Equipement",
+      "Sous-catégorie": "Divers & Accessoires",
+      Marque: "",
+      "Prix d'achat unitaire (FCFA)": 490,
+      "Prix de vente conseillé": 1500,
+      "Date d'expiration": "",
+      Statut: "Actif",
+      Observations: "",
+    };
+    let total = 0;
+    emplacementsActifsModele.forEach((e, i) => {
+      const qte = i === 0 ? 2000 : 0;
+      ligneExemple[e.nom] = qte;
+      total += qte;
+    });
+    ligneExemple["Quantité totale"] = total;
+
+    exporterExcelMisEnForme("Modèle_Commande_Onyx_Pharm", "Modèle", colonnes, [
+      ligneExemple,
+    ]);
   }
 
-  function validerLignesImport(brutes: Record<string, unknown>[]): LigneImportee[] {
+  function validerLignesImport(
+    brutes: Record<string, unknown>[],
+    colonnesEmplacement: string[]
+  ): LigneImportee[] {
     return brutes.map((row, i) => {
       const erreurs: string[] = [];
       const designation = String(row["Désignation"] ?? "").trim();
-      const emplacement = String(row["Emplacement"] ?? "").trim();
-      const quantite = row["Quantité"];
+      const prixAchat = row["Prix d'achat unitaire (FCFA)"];
+      const prixVente = row["Prix de vente conseillé"];
       const dateExpiration = String(row["Date d'expiration"] ?? "").trim();
 
-      // Catégorie, sous-catégorie, fournisseur et emplacement ne sont
-      // plus jamais des erreurs bloquantes : s'ils n'existent pas déjà
-      // (une fois la casse et les accents ignorés), ils sont créés
-      // automatiquement au moment de l'enregistrement. Seuls la
-      // désignation, la quantité et le format de la date restent
-      // vérifiés ici.
       if (!designation) erreurs.push("Désignation vide");
-      if (!emplacement) erreurs.push("Emplacement obligatoire");
-      if (!quantite || Number.isNaN(Number(quantite)) || Number(quantite) <= 0) {
-        erreurs.push("Quantité invalide");
+      if (prixAchat !== "" && prixAchat !== undefined && Number.isNaN(Number(prixAchat))) {
+        erreurs.push("Prix d'achat invalide");
+      }
+      if (prixVente !== "" && prixVente !== undefined && Number.isNaN(Number(prixVente))) {
+        erreurs.push("Prix de vente invalide");
       }
       if (dateExpiration && Number.isNaN(Date.parse(dateExpiration))) {
         erreurs.push("Date d'expiration incorrecte");
+      }
+
+      // Chaque colonne d'emplacement doit être un nombre positif ou
+      // vide. "Quantité totale" est une colonne de contrôle facultative
+      // : si remplie, elle doit correspondre à la somme des
+      // emplacements — sinon l'écart est signalé avant import, comme
+      // pour le modèle d'articles.
+      let sommeEmplacements = 0;
+      for (const nomColonne of colonnesEmplacement) {
+        const valeur = row[nomColonne];
+        if (valeur === undefined || valeur === "") continue;
+        const nombre = Number(valeur);
+        if (Number.isNaN(nombre) || nombre < 0) {
+          erreurs.push(`Quantité invalide pour "${nomColonne}"`);
+        } else {
+          sommeEmplacements += nombre;
+        }
+      }
+      if (sommeEmplacements <= 0) {
+        erreurs.push("Aucune quantité renseignée dans les emplacements");
+      }
+
+      const quantiteTotale = row["Quantité totale"];
+      if (quantiteTotale !== "" && quantiteTotale !== undefined) {
+        const attendu = Number(quantiteTotale);
+        if (Number.isNaN(attendu)) {
+          erreurs.push('"Quantité totale" invalide');
+        } else if (attendu !== sommeEmplacements) {
+          erreurs.push(
+            `"Quantité totale" (${attendu}) ne correspond pas à la somme des emplacements (${sommeEmplacements})`
+          );
+        }
       }
 
       const articleExistant = articlesOptions.find(
@@ -335,7 +412,19 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
         setError('Colonne manquante : "Désignation". Utilisez le modèle fourni.');
         return;
       }
-      setLignesImportees(validerLignesImport(brutes));
+      // Toute colonne du fichier qui n'est ni une colonne fixe est un
+      // emplacement — connu ou nouveau (créé automatiquement à
+      // l'enregistrement). Comparaison normalisée (accents/majuscules
+      // ignorés) pour qu'une colonne fixe légèrement mal tapée ne soit
+      // jamais prise à tort pour un emplacement.
+      const colonnesFixesNormalisees = new Set(
+        [...COLONNES_AVANT_EMPLACEMENT, ...COLONNES_APRES_EMPLACEMENT].map(normaliser)
+      );
+      const colonnesEmplacement = Object.keys(brutes[0]).filter(
+        (c) => !colonnesFixesNormalisees.has(normaliser(c))
+      );
+      setColonnesEmplacementFichier(colonnesEmplacement);
+      setLignesImportees(validerLignesImport(brutes, colonnesEmplacement));
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("[ONYX PHARM] Erreur lecture fichier import conteneur", e);
@@ -362,15 +451,19 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
       return;
     }
 
+    const lignesImporteesValides = lignesImportees.filter((l) => l.valide);
+    const articlesACreer = lignesImporteesValides.filter((l) => !l.articleExistantId);
+    const idsCrees = new Map<number, string>();
+
     setSaving(true);
+    setProgression({
+      actuel: 0,
+      total: articlesACreer.length + lignesManuelles.length + lignesImporteesValides.length + 1,
+    });
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
-
-    const lignesImporteesValides = lignesImportees.filter((l) => l.valide);
-    const articlesACreer = lignesImporteesValides.filter((l) => !l.articleExistantId);
-    const idsCrees = new Map<number, string>();
 
     // Copies de travail : les catégories/sous-catégories/fournisseurs/
     // emplacements créés pendant cet import s'y ajoutent au fur et à
@@ -378,10 +471,10 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
     // retrouvent sans les recréer en double.
     const categoriesTravail = [...categories];
     const sousCategoriesTravail = [...sousCategories];
-    const fournisseursTravail = [...fournisseurs];
     const emplacementsTravail = [...emplacements];
 
     for (const ligne of articlesACreer) {
+      setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
       const row = ligne.data;
 
       const categorieId = await trouverOuCreer(
@@ -412,19 +505,6 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
           )
         : null;
 
-      const fournisseurArticleId = await trouverOuCreer(
-        String(row["Fournisseur"] ?? ""),
-        fournisseursTravail,
-        async (nomSaisi) => {
-          const { data } = await supabase
-            .from("fournisseurs")
-            .insert({ nom: nomSaisi })
-            .select("id, nom")
-            .single();
-          return data;
-        }
-      );
-
       const statutValeur = String(row["Statut"] ?? "Actif").trim();
       const statutFinal = statutsArticle.some(
         (s) => normaliser(s.valeur) === normaliser(statutValeur)
@@ -439,10 +519,9 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
           categorie_id: categorieId,
           sous_categorie_id: sousCategorieId,
           marque: String(row["Marque"] ?? "").trim() || null,
-          fournisseur_id: fournisseurArticleId,
-          stock_minimum: Number(row["Stock minimum"]) || 0,
+          fournisseur_id: fournisseurId || null,
+          stock_minimum: 0,
           prix_vente_conseille: Number(row["Prix de vente conseillé"]) || 0,
-          numero_lot: String(row["Numéro de lot"] ?? "").trim() || null,
           date_expiration: String(row["Date d'expiration"] ?? "").trim() || null,
           statut: statutFinal,
           observations: String(row["Observations"] ?? "").trim() || null,
@@ -465,39 +544,68 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
       idsCrees.set(ligne.index, article.id);
     }
 
-    const lignesFinal: { article_id: string; emplacement_id: string; quantite: number }[] = [];
+    const lignesFinal: {
+      article_id: string;
+      emplacement_id: string;
+      quantite: number;
+      prix_achat_unitaire: number | null;
+      prix_vente_conseille: number | null;
+    }[] = [];
 
     for (const l of lignesManuelles) {
+      setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
       if (l.article_id && Number(l.quantite) > 0) {
         lignesFinal.push({
           article_id: l.article_id,
           emplacement_id: l.emplacement_id,
           quantite: Number(l.quantite),
+          prix_achat_unitaire: l.prixAchatUnitaire ? Number(l.prixAchatUnitaire) : null,
+          prix_vente_conseille: l.prixVente ? Number(l.prixVente) : null,
         });
       }
     }
 
     for (const ligne of lignesImporteesValides) {
+      setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
       const articleId = ligne.articleExistantId ?? idsCrees.get(ligne.index);
       if (!articleId) continue;
-      const emplacementId = await trouverOuCreer(
-        String(ligne.data["Emplacement"] ?? ""),
-        emplacementsTravail,
-        async (nomSaisi) => {
-          const { data } = await supabase
-            .from("emplacements")
-            .insert({ nom: nomSaisi })
-            .select("id, nom")
-            .single();
-          return data;
-        }
-      );
-      if (!emplacementId) continue;
-      lignesFinal.push({
-        article_id: articleId,
-        emplacement_id: emplacementId,
-        quantite: Number(ligne.data["Quantité"]),
-      });
+
+      const prixAchatLigne = ligne.data["Prix d'achat unitaire (FCFA)"];
+      const prixVenteLigne = ligne.data["Prix de vente conseillé"];
+
+      for (const nomColonne of colonnesEmplacementFichier) {
+        const valeurBrute = ligne.data[nomColonne];
+        const quantite = Number(valeurBrute) || 0;
+        if (quantite <= 0) continue;
+
+        const emplacementId = await trouverOuCreer(
+          nomColonne,
+          emplacementsTravail,
+          async (nomSaisi) => {
+            const { data } = await supabase
+              .from("emplacements")
+              .insert({ nom: nomSaisi })
+              .select("id, nom")
+              .single();
+            return data;
+          }
+        );
+        if (!emplacementId) continue;
+
+        lignesFinal.push({
+          article_id: articleId,
+          emplacement_id: emplacementId,
+          quantite,
+          prix_achat_unitaire:
+            prixAchatLigne !== "" && prixAchatLigne !== undefined
+              ? Number(prixAchatLigne)
+              : null,
+          prix_vente_conseille:
+            prixVenteLigne !== "" && prixVenteLigne !== undefined
+              ? Number(prixVenteLigne)
+              : null,
+        });
+      }
     }
 
     const { error: rpcError } = await supabase.rpc("creer_conteneur", {
@@ -508,6 +616,8 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
       p_observation: observation.trim() || null,
       p_lignes: lignesFinal,
       p_utilisateur_id: user?.id ?? null,
+      p_taux_change: tauxChange.trim() ? Number(tauxChange) : null,
+      p_coefficient_marge: coefficientMarge.trim() ? Number(coefficientMarge) : null,
     });
 
     setSaving(false);
@@ -586,9 +696,45 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
               step="1"
               value={montant}
               onChange={(e) => setMontant(e.target.value)}
-              placeholder="Laissez vide si non renseigné"
+              placeholder="Calculé automatiquement si un prix est mis par article"
               className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
             />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+              Taux de change — optionnel
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={tauxChange}
+              onChange={(e) => setTauxChange(e.target.value)}
+              placeholder="Ex : 700"
+              className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+            />
+            <p className="mt-1 text-xs text-onyx-400">
+              Indicatif, pour convertir un prix en devise — n&apos;affecte
+              rien automatiquement.
+            </p>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+              Coefficient de marge — optionnel
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={coefficientMarge}
+              onChange={(e) => setCoefficientMarge(e.target.value)}
+              placeholder="Ex : 2.5"
+              className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+            />
+            <p className="mt-1 text-xs text-onyx-400">
+              Suggère automatiquement le prix de vente de chaque ligne
+              (prix d&apos;achat × coefficient), modifiable ensuite.
+            </p>
           </div>
           <div className="sm:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-onyx-700">
@@ -665,7 +811,10 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-onyx-500">{String(l.data["Quantité"] ?? "—")}</td>
+                        <td className="px-3 py-2 text-onyx-500">
+                          {colonnesEmplacementFichier
+                            .reduce((s, col) => s + (Number(l.data[col]) || 0), 0)}
+                        </td>
                         <td className="px-3 py-2">
                           {l.valide ? (
                             <span className="text-emerald-600">Valide</span>
@@ -756,6 +905,48 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
                       <Trash2 size={16} />
                     </button>
                   </div>
+
+                  <div className="sm:col-span-6">
+                    <label className="mb-1 block text-xs font-medium text-onyx-500">
+                      Prix d&apos;achat unitaire (FCFA)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Optionnel"
+                      value={l.prixAchatUnitaire}
+                      onChange={(e) => {
+                        const valeur = e.target.value;
+                        const coef = Number(coefficientMarge);
+                        majLigneManuelle(i, {
+                          prixAchatUnitaire: valeur,
+                          // Suggère automatiquement le prix de vente si un
+                          // coefficient est renseigné et qu'aucun prix de
+                          // vente n'a déjà été saisi à la main.
+                          prixVente:
+                            !l.prixVente && coef > 0 && Number(valeur) > 0
+                              ? String(Math.round(Number(valeur) * coef))
+                              : l.prixVente,
+                        });
+                      }}
+                      className="w-full rounded-md border border-onyx-200 px-2.5 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                    />
+                  </div>
+                  <div className="sm:col-span-6">
+                    <label className="mb-1 block text-xs font-medium text-onyx-500">
+                      Prix de vente conseillé
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Optionnel"
+                      value={l.prixVente}
+                      onChange={(e) => majLigneManuelle(i, { prixVente: e.target.value })}
+                      className="w-full rounded-md border border-onyx-200 px-2.5 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -785,6 +976,22 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
             Créer la commande
           </PrimaryButton>
         </div>
+        {saving && progression.total > 0 && (
+          <div className="mt-1">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-onyx-100">
+              <div
+                className="h-full rounded-full bg-accent-500 transition-all duration-200"
+                style={{
+                  width: `${Math.round((progression.actuel / progression.total) * 100)}%`,
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-onyx-400">
+              {progression.actuel} / {progression.total} traité
+              {progression.actuel > 1 ? "s" : ""}
+            </p>
+          </div>
+        )}
       </form>
     </div>
   );

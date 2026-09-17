@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, Search, Pencil, Trash2, AlertTriangle, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
-import { getStockInitialId } from "@/lib/conteneurs";
 import {
   ArticleFormModal,
   EMPTY_ARTICLE_FORM,
@@ -12,9 +11,8 @@ import {
 } from "@/components/articles/ArticleForm";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
-import { StatutBadge, InlineBanner } from "@/components/ui/Badges";
-import { Modal } from "@/components/ui/Modal";
-import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
+import { StatutBadge } from "@/components/ui/Badges";
+import { PrimaryButton } from "@/components/ui/Buttons";
 import { PinModal } from "@/components/securite/PinModal";
 
 type ArticleRow = {
@@ -67,21 +65,11 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingValues, setEditingValues] =
     useState<ArticleFormValues>(EMPTY_ARTICLE_FORM);
-  const [stockDisponibleEdition, setStockDisponibleEdition] = useState<
-    number | undefined
+  const [stockParEmplacementEdition, setStockParEmplacementEdition] = useState<
+    Record<string, number> | undefined
   >(undefined);
   const [pinModalArticle, setPinModalArticle] = useState<ArticleRow | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [ajustement, setAjustement] = useState<{
-    articleId: string;
-    designation: string;
-    emplacementId: string;
-    emplacementNom: string;
-    quantiteActuelle: number;
-  } | null>(null);
-  const [nouvelleQuantite, setNouvelleQuantite] = useState("");
-  const [ajustementSaving, setAjustementSaving] = useState(false);
-  const [ajustementError, setAjustementError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,6 +103,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
 
   function openCreate() {
     setEditingValues(EMPTY_ARTICLE_FORM);
+    setStockParEmplacementEdition(undefined);
     setModalOpen(true);
   }
 
@@ -133,9 +122,11 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       statut: article.statut,
       observations: article.observations ?? "",
     });
-    setStockDisponibleEdition(
-      article.stocks.reduce((s, ligne) => s + ligne.quantite, 0)
-    );
+    const parEmpl: Record<string, number> = {};
+    for (const ligne of article.stocks) {
+      parEmpl[ligne.emplacement_id] = (parEmpl[ligne.emplacement_id] ?? 0) + ligne.quantite;
+    }
+    setStockParEmplacementEdition(parEmpl);
     setModalOpen(true);
   }
 
@@ -158,126 +149,21 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
     load();
   }
 
-  function openAjustement(
-    articleId: string,
-    designation: string,
-    emplacementId: string,
-    emplacementNom: string,
-    quantiteActuelle: number
-  ) {
-    setAjustement({ articleId, designation, emplacementId, emplacementNom, quantiteActuelle });
-    setNouvelleQuantite(String(quantiteActuelle));
-    setAjustementError(null);
-  }
-
-  async function handleAjustement(e: React.FormEvent) {
-    e.preventDefault();
-    if (!ajustement) return;
-
-    const nouvelle = Number(nouvelleQuantite);
-    if (Number.isNaN(nouvelle) || nouvelle < 0) {
-      setAjustementError("Quantité invalide.");
-      return;
-    }
-    const delta = nouvelle - ajustement.quantiteActuelle;
-    if (delta === 0) {
-      setAjustement(null);
-      return;
-    }
-
-    setAjustementSaving(true);
-    setAjustementError(null);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (delta < 0) {
-      const { data: repartition, error: fifoError } = await supabase.rpc(
-        "consommer_stock_fifo",
-        {
-          p_article_id: ajustement.articleId,
-          p_emplacement_id: ajustement.emplacementId,
-          p_quantite: -delta,
-          p_conteneur_id: null,
-        }
-      );
-      if (fifoError) {
-        setAjustementError(
-          logSupabaseError(
-            { table: "stocks", operation: "rpc consommer_stock_fifo" },
-            fifoError,
-            "Impossible de corriger le stock. Réessayez."
-          )
-        );
-        setAjustementSaving(false);
-        return;
-      }
-      for (const part of repartition ?? []) {
-        await supabase.from("mouvements_stock").insert({
-          article_id: ajustement.articleId,
-          emplacement_id: ajustement.emplacementId,
-          type: "autre_sortie",
-          quantite: -part.quantite,
-          document_type: "ajustement_manuel",
-          observation: "Correction manuelle de stock",
-          created_by: user?.id ?? null,
-        });
-      }
-    } else {
-      const stockInitialId = await getStockInitialId(supabase);
-      if (!stockInitialId) {
-        setAjustementError(
-          "Commande « Stock Initial » introuvable. Exécutez la migration 0015 dans Supabase."
-        );
-        setAjustementSaving(false);
-        return;
-      }
-      const { error: upsertError } = await supabase.from("stocks").upsert(
-        {
-          article_id: ajustement.articleId,
-          emplacement_id: ajustement.emplacementId,
-          conteneur_id: stockInitialId,
-          quantite: delta,
-        },
-        { onConflict: "article_id,emplacement_id,conteneur_id" }
-      );
-      if (upsertError) {
-        setAjustementError(
-          logSupabaseError(
-            { table: "stocks", operation: "upsert" },
-            upsertError,
-            "Impossible de mettre à jour le stock. Réessayez."
-          )
-        );
-        setAjustementSaving(false);
-        return;
-      }
-      await supabase.from("mouvements_stock").insert({
-        article_id: ajustement.articleId,
-        emplacement_id: ajustement.emplacementId,
-        type: "autre_entree",
-        quantite: delta,
-        document_type: "ajustement_manuel",
-        observation: "Correction manuelle de stock",
-        created_by: user?.id ?? null,
-      });
-    }
-
-    setAjustementSaving(false);
-    setAjustement(null);
-    load();
-  }
-
   const enrichis = useMemo(
     () =>
       articles.map((a) => {
         const stockTotal = a.stocks.reduce((sum, s) => sum + s.quantite, 0);
         const stockFaible = stockTotal <= a.stock_minimum;
+        // Jaune : le stock approche encore du seuil d'alerte sans
+        // l'avoir atteint (moins de 1,3 fois le seuil). Rouge : déjà au
+        // seuil ou en dessous.
+        const stockProche =
+          !stockFaible && a.stock_minimum > 0 && stockTotal < a.stock_minimum * 1.3;
         const jours = joursAvantExpiration(a.date_expiration);
         const expire = jours !== null && jours < 0;
         const bientotExpire =
           jours !== null && jours >= 0 && jours <= delaiAlerte;
-        return { ...a, stockTotal, stockFaible, expire, bientotExpire, jours };
+        return { ...a, stockTotal, stockFaible, stockProche, expire, bientotExpire, jours };
       }),
     [articles, delaiAlerte]
   );
@@ -413,7 +299,9 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                       className={`rounded-full px-2 py-0.5 font-medium ${
                         a.stockFaible
                           ? "bg-red-50 text-red-600"
-                          : "bg-onyx-50 text-onyx-500"
+                          : a.stockProche
+                            ? "bg-amber-50 text-amber-600"
+                            : "bg-onyx-50 text-onyx-500"
                       }`}
                     >
                       Stock : {a.stockTotal}
@@ -444,7 +332,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                     <th className="px-4 py-3">Catégorie</th>
                     <th className="px-4 py-3">Sous-catégorie</th>
                     <th className="px-4 py-3 text-right">Prix vente référence</th>
-                    <th className="px-4 py-3 text-right">Stock (cliquer pour corriger)</th>
+                    <th className="px-4 py-3 text-right">Stock (cliquer pour le détail)</th>
                     <th className="px-4 py-3">Statut</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -512,13 +400,14 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                               className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                                 a.stockFaible
                                   ? "bg-red-50 text-red-600 hover:bg-red-100"
-                                  : "bg-onyx-50 text-onyx-600 hover:bg-accent-50 hover:text-accent-700"
+                                  : a.stockProche
+                                    ? "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                                    : "bg-onyx-50 text-onyx-600 hover:bg-accent-50 hover:text-accent-700"
                               }`}
-                              title="Voir le détail et corriger le stock"
+                              title="Voir le détail par emplacement"
                             >
                               {a.stockFaible && <AlertTriangle size={11} />}
                               {a.stockTotal}
-                              <Pencil size={10} className="opacity-60" />
                             </button>
                           </td>
                           <td className="px-4 py-3">
@@ -577,24 +466,9 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
                                         )}
                                       </div>
                                       <div className="flex items-center gap-2">
-                                        <span className="text-sm text-onyx-600">
+                                        <span className="text-sm font-medium text-onyx-700">
                                           {info.total}
                                         </span>
-                                        <button
-                                          onClick={() =>
-                                            openAjustement(
-                                              a.id,
-                                              a.designation,
-                                              emplId,
-                                              info.nom,
-                                              info.total
-                                            )
-                                          }
-                                          className="flex items-center gap-1.5 rounded-md border border-accent-200 bg-accent-50 px-2.5 py-1.5 text-xs font-medium text-accent-700 hover:bg-accent-100"
-                                        >
-                                          <Pencil size={13} />
-                                          Corriger le stock
-                                        </button>
                                       </div>
                                     </div>
                                   ))}
@@ -616,7 +490,7 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
       {modalOpen && (
         <ArticleFormModal
           initialValues={editingValues}
-          stockDisponible={stockDisponibleEdition}
+          stockParEmplacement={stockParEmplacementEdition}
           onClose={() => setModalOpen(false)}
           onSaved={() => {
             setModalOpen(false);
@@ -634,46 +508,6 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
         />
       )}
 
-      {ajustement && (
-        <Modal
-          title={`Ajuster le stock — ${ajustement.emplacementNom}`}
-          onClose={() => setAjustement(null)}
-        >
-          <form onSubmit={handleAjustement} className="space-y-4">
-            {ajustementError && <InlineBanner message={ajustementError} />}
-            <p className="text-sm text-onyx-500">{ajustement.designation}</p>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-                Nouvelle quantité
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                required
-                value={nouvelleQuantite}
-                onChange={(e) => setNouvelleQuantite(e.target.value)}
-                className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-              />
-              <p className="mt-1 text-xs text-onyx-400">
-                Quantité actuelle : {ajustement.quantiteActuelle}
-              </p>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <SecondaryButton
-                type="button"
-                onClick={() => setAjustement(null)}
-                className="flex-1"
-              >
-                Annuler
-              </SecondaryButton>
-              <PrimaryButton type="submit" loading={ajustementSaving} className="flex-1">
-                Enregistrer
-              </PrimaryButton>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }

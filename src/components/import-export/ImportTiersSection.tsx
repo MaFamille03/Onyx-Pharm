@@ -18,6 +18,7 @@ export function ImportTiersSection() {
   const [erreur, setErreur] = useState<string | null>(null);
   const [resultat, setResultat] = useState<string | null>(null);
   const [importing, setImporting] = useState<"clients" | "fournisseurs" | null>(null);
+  const [progression, setProgression] = useState({ actuel: 0, total: 0 });
 
   function telechargerModele(type: "clients" | "fournisseurs") {
     exporterExcelMisEnForme(
@@ -64,7 +65,10 @@ export function ImportTiersSection() {
         (existants ?? []).map((t: { nom: string }) => normaliser(t.nom))
       );
 
+      setProgression({ actuel: 0, total: brutes.length });
+
       for (const row of brutes) {
+        setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
         const nom = String(row["Nom"] ?? "").trim();
         if (!nom) {
           echoues += 1;
@@ -184,6 +188,23 @@ export function ImportTiersSection() {
           </div>
         </div>
       </div>
+
+      {importing && progression.total > 0 && (
+        <div className="mt-4">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-onyx-100">
+            <div
+              className="h-full rounded-full bg-accent-500 transition-all duration-200"
+              style={{
+                width: `${Math.round((progression.actuel / progression.total) * 100)}%`,
+              }}
+            />
+          </div>
+          <p className="mt-1.5 text-xs text-onyx-400">
+            {progression.actuel} / {progression.total} traité
+            {progression.actuel > 1 ? "s" : ""}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
