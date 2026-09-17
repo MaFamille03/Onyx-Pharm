@@ -44,17 +44,6 @@ const COLONNES_APRES_EMPLACEMENT = [
   "Observations",
 ];
 
-/** Trouve la valeur d'une colonne par nom, insensible aux accents et à
- * la casse — pour tolérer un en-tête d'emplacement tapé légèrement
- * différemment (ex : "bureau" au lieu de "Bureau"). */
-function trouverValeurColonne(
-  row: Record<string, unknown>,
-  colonne: string
-): unknown {
-  const cle = Object.keys(row).find((k) => normaliser(k) === normaliser(colonne));
-  return cle ? row[cle] : undefined;
-}
-
 type LigneImport = {
   index: number;
   data: Record<string, unknown>;
@@ -69,6 +58,7 @@ export function ImportExportManager() {
 
   const [exportingType, setExportingType] = useState<string | null>(null);
   const [lignes, setLignes] = useState<LigneImport[]>([]);
+  const [colonnesEmplacementFichier, setColonnesEmplacementFichier] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [resultat, setResultat] = useState<string | null>(null);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
@@ -148,9 +138,9 @@ export function ImportExportManager() {
 
   function validerLignes(
     brutes: Record<string, unknown>[],
-    designationsExistantes: Set<string>
+    designationsExistantes: Set<string>,
+    colonnesEmplacement: string[]
   ): LigneImport[] {
-    const emplacementsActifs = emplacements.filter((e) => e.actif);
     const designationsVues = new Set<string>();
 
     return brutes.map((row, i) => {
@@ -179,17 +169,18 @@ export function ImportExportManager() {
         erreurs.push("Date d'expiration incorrecte");
       }
 
-      // Une colonne par emplacement : chaque valeur doit être un
-      // nombre positif ou vide — jamais bloquant si absente (0 par
-      // défaut), mais une valeur incorrecte (texte, négatif) est
-      // signalée précisément, avec le nom de l'emplacement concerné.
+      // Chaque colonne du fichier qui n'est pas une colonne fixe est
+      // traitée comme un emplacement — qu'il existe déjà dans
+      // Paramètres ou non (il sera créé automatiquement à l'import,
+      // comme partout ailleurs dans le site). Seule la valeur doit
+      // être un nombre positif ou vide.
       let sommeEmplacements = 0;
-      for (const emp of emplacementsActifs) {
-        const valeur = trouverValeurColonne(row, emp.nom);
+      for (const nomColonne of colonnesEmplacement) {
+        const valeur = row[nomColonne];
         if (valeur === undefined || valeur === "") continue;
         const nombre = Number(valeur);
         if (Number.isNaN(nombre) || nombre < 0) {
-          erreurs.push(`Quantité invalide pour "${emp.nom}"`);
+          erreurs.push(`Quantité invalide pour "${nomColonne}"`);
         } else {
           sommeEmplacements += nombre;
         }
@@ -226,6 +217,7 @@ export function ImportExportManager() {
       if (brutes.length === 0) {
         setErreurGenerale("Le fichier est vide ou illisible.");
         setLignes([]);
+        setColonnesEmplacementFichier([]);
         return;
       }
       const colonnesFichier = Object.keys(brutes[0]);
@@ -234,8 +226,25 @@ export function ImportExportManager() {
           "Colonne manquante : \"Désignation\". Vérifiez que vous utilisez bien le modèle fourni."
         );
         setLignes([]);
+        setColonnesEmplacementFichier([]);
         return;
       }
+      // Toute colonne du fichier qui n'est ni une colonne fixe ni
+      // "Stock Disponible" est un emplacement — connu ou nouveau, peu
+      // importe : il sera créé automatiquement à l'import s'il
+      // n'existe pas encore (comme pour catégorie/fournisseur).
+      // Comparaison normalisée (accents/majuscules ignorés) pour
+      // qu'une colonne fixe légèrement mal tapée (ex : "designation"
+      // sans accent) reste bien reconnue comme fixe — et ne soit
+      // jamais prise à tort pour un emplacement à créer.
+      const colonnesFixesNormalisees = new Set(
+        [...COLONNES_AVANT_EMPLACEMENT, ...COLONNES_APRES_EMPLACEMENT].map(normaliser)
+      );
+      const colonnesEmplacement = colonnesFichier.filter(
+        (c) => !colonnesFixesNormalisees.has(normaliser(c))
+      );
+      setColonnesEmplacementFichier(colonnesEmplacement);
+
       // Vérifie aussi les articles déjà existants en base, pour éviter
       // de créer des doublons — pas seulement les doublons internes au
       // fichier.
@@ -245,7 +254,7 @@ export function ImportExportManager() {
       const designationsExistantes = new Set(
         (articlesExistants ?? []).map((a) => normaliser(a.designation))
       );
-      setLignes(validerLignes(brutes, designationsExistantes));
+      setLignes(validerLignes(brutes, designationsExistantes, colonnesEmplacement));
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("[ONYX PHARM] Erreur lecture fichier import articles", e);
@@ -271,6 +280,7 @@ export function ImportExportManager() {
     const categoriesTravail = [...categories];
     const sousCategoriesTravail = [...sousCategories];
     const fournisseursTravail = [...fournisseurs];
+    const emplacementsTravail = [...emplacements];
 
     let reussies = 0;
     let echouees = 0;
@@ -357,20 +367,34 @@ export function ImportExportManager() {
         continue;
       }
 
-      // Une colonne par emplacement : on crée le stock correspondant
-      // pour chacune qui contient une quantité positive — c'est ici
-      // que la quantité de chaque emplacement est réellement prise en
-      // compte, une par une, sans rien mélanger entre elles.
-      const emplacementsActifs = emplacements.filter((e) => e.actif);
-      for (const emp of emplacementsActifs) {
-        const valeurBrute = trouverValeurColonne(row, emp.nom);
+      // Une colonne par emplacement, telle que trouvée dans le fichier
+      // (pas seulement celles déjà connues) : celle qui n'existe pas
+      // encore dans Paramètres est créée automatiquement ici, avant
+      // d'y écrire la quantité — exactement comme catégorie ou
+      // fournisseur plus haut.
+      for (const nomColonne of colonnesEmplacementFichier) {
+        const valeurBrute = row[nomColonne];
         const quantite = Number(valeurBrute) || 0;
         if (quantite <= 0) continue;
+
+        const emplacementId = await trouverOuCreer(
+          nomColonne,
+          emplacementsTravail,
+          async (nomSaisi) => {
+            const { data } = await supabase
+              .from("emplacements")
+              .insert({ nom: nomSaisi })
+              .select("id, nom")
+              .single();
+            return data;
+          }
+        );
+        if (!emplacementId) continue;
 
         const { error: stockErr } = await supabase.from("stocks").upsert(
           {
             article_id: article.id,
-            emplacement_id: emp.id,
+            emplacement_id: emplacementId,
             conteneur_id: stockInitialId,
             quantite,
           },
@@ -386,11 +410,11 @@ export function ImportExportManager() {
         }
         const { error: mouvementErr } = await supabase.from("mouvements_stock").insert({
           article_id: article.id,
-          emplacement_id: emp.id,
+          emplacement_id: emplacementId,
           type: "autre_entree",
           quantite,
           document_type: "import_excel",
-          observation: `Import Excel initial — ${emp.nom}`,
+          observation: `Import Excel initial — ${nomColonne}`,
           created_by: user?.id ?? null,
         });
         if (mouvementErr) {
@@ -413,6 +437,7 @@ export function ImportExportManager() {
       } — ${totalQuantiteImportee} unité(s) au total réparties dans le stock.`
     );
     setLignes([]);
+    setColonnesEmplacementFichier([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -602,6 +627,19 @@ export function ImportExportManager() {
 
         {lignes.length > 0 && (
           <div className="mt-4">
+            {colonnesEmplacementFichier.length > 0 && (
+              <div className="mb-3 rounded-lg border border-accent-200 bg-accent-50 px-3.5 py-2.5 text-sm text-accent-800">
+                <strong>Emplacements détectés dans ce fichier :</strong>{" "}
+                {colonnesEmplacementFichier.join(", ")}
+                <br />
+                <span className="text-xs text-accent-700">
+                  Vérifiez cette liste — c&apos;est ce qui sera créé ou
+                  utilisé comme emplacement. Une colonne mal orthographiée
+                  ici serait créée en tant que nouvel emplacement par
+                  erreur.
+                </span>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-3 rounded-lg bg-onyx-50/50 px-3.5 py-2.5 text-sm">
               <span className="text-onyx-600">
                 {lignes.length} ligne{lignes.length > 1 ? "s" : ""} détectée
