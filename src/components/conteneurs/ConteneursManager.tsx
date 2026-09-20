@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Package2, Plus, ArrowLeft, Pencil, Trash2, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, CreditCard, Search } from "lucide-react";
+import { Package2, Plus, ArrowLeft, Pencil, Trash2, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, CreditCard, Search, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { lireFichierExcel, exporterExcelMisEnForme } from "@/lib/excel";
@@ -16,6 +16,7 @@ import { FournisseurSelect } from "@/components/tiers/FournisseurSelect";
 import { ArticleSelect } from "@/components/articles/ArticleSelect";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
+import { useExporterTable } from "@/lib/hooks/useExporterTable";
 
 type ConteneurRow = {
   id: string;
@@ -111,6 +112,7 @@ function ListeConteneurs({
   onOpen: (id: string) => void;
 }) {
   const supabase = createClient();
+  const { exportingType, exporterTable } = useExporterTable();
   const [conteneurs, setConteneurs] = useState<ConteneurRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [stockParConteneur, setStockParConteneur] = useState<Record<string, number>>({});
@@ -161,7 +163,33 @@ function ListeConteneurs({
         </PrimaryButton>
       </div>
 
-      <div className="mt-5">
+      <div className="mt-3 flex justify-end">
+        <SecondaryButton
+          onClick={() =>
+            exporterTable(
+              "conteneurs",
+              "Commandes",
+              "conteneurs",
+              "code, date_arrivee, montant_achat_global, montant_paye, statut",
+              (r) => ({
+                Code: r.code,
+                Date: r.date_arrivee,
+                "Montant d'achat": r.montant_achat_global,
+                Payé: r.montant_paye,
+                Statut: r.statut,
+              }),
+              "Montant d'achat"
+            )
+          }
+          loading={exportingType === "conteneurs"}
+          className="min-h-0 px-3 py-1.5 text-xs"
+        >
+          <Download size={14} />
+          Exporter en Excel
+        </SecondaryButton>
+      </div>
+
+      <div className="mt-3">
         {loading ? (
           <p className="py-10 text-center text-sm text-onyx-400">Chargement...</p>
         ) : conteneurs.length === 0 ? (

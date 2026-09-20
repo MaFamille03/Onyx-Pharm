@@ -29,6 +29,12 @@ export const NAVIGATION: NavSection[] = [
     icon: "package",
   },
   {
+    label: "Stock de départ",
+    href: "/stock/stock-de-depart",
+    step: 4,
+    icon: "package",
+  },
+  {
     label: "Commandes",
     href: "/stock/conteneurs",
     step: 10,
@@ -62,12 +68,6 @@ export const NAVIGATION: NavSection[] = [
     href: "/rapports",
     step: 10,
     icon: "bar-chart-3",
-  },
-  {
-    label: "Import / Export",
-    href: "/import-export",
-    step: 10,
-    icon: "file-spreadsheet",
   },
   {
     label: "Utilisateurs",

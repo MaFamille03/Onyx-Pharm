@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { X, Printer } from "lucide-react";
+import { useNomUtilisateurConnecte } from "@/lib/hooks/useEntrepriseInfo";
 
 export type ColonneRapport = {
   label: string;
@@ -26,6 +27,7 @@ export function RapportPrintable({
   totalValeur?: string | number;
   onClose: () => void;
 }) {
+  const nomUtilisateur = useNomUtilisateurConnecte();
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-onyx-950/60">
       <div className="no-print sticky top-0 z-10 flex items-center justify-between border-b border-onyx-100 bg-white px-4 py-3">
@@ -145,6 +147,17 @@ export function RapportPrintable({
         <p className="mt-8 text-center text-xs text-onyx-300">
           Document généré automatiquement par ONYX PHARM.
         </p>
+        <div className="mt-4 border-t border-onyx-100 pt-4 text-center">
+          <p className="text-xs font-medium text-onyx-500">
+            ONYX Pharm Sarl - la qualité au service de nos clients
+          </p>
+          {nomUtilisateur && (
+            <p className="mt-1 text-[11px] text-onyx-300">
+              Imprimé par {nomUtilisateur} le{" "}
+              {new Date().toLocaleDateString("fr-FR")}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

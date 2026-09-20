@@ -12,15 +12,11 @@ import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { getStockInitialId } from "@/lib/conteneurs";
 import { normaliser, trouverOuCreer } from "@/lib/normaliser";
-import {
-  exporterExcelMisEnForme,
-  lireFichierExcel,
-} from "@/lib/excel";
+import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
-import { ImportVentesSection } from "@/components/import-export/ImportVentesSection";
-import { ImportTiersSection } from "@/components/import-export/ImportTiersSection";
+import { useExporterTable } from "@/lib/hooks/useExporterTable";
 
 // Colonnes fixes du modèle. Les emplacements s'insèrent dynamiquement
 // entre les deux groupes (une colonne par emplacement actif du site),
@@ -51,52 +47,27 @@ type LigneImport = {
   valide: boolean;
 };
 
-export function ImportExportManager() {
+/**
+ * "Stock de départ" — sert uniquement à la mise en place initiale du
+ * catalogue (ce qu'on possédait déjà avant d'utiliser le site), séparé
+ * volontairement de "Commande" qui sert aux arrivages ultérieurs. Voir
+ * aussi Ventes > Ventes (import de ventes) et Tiers > Annuaire (import
+ * clients/fournisseurs) pour les autres imports, chacun dans sa zone.
+ */
+export function StockDepartManager() {
   const supabase = createClient();
   const { categories, sousCategories, fournisseurs, emplacements, statutsArticle } =
     useReferenceData();
+  const { exportingType, exporterTable } = useExporterTable();
 
-  const [exportingType, setExportingType] = useState<string | null>(null);
   const [lignes, setLignes] = useState<LigneImport[]>([]);
   const [colonnesEmplacementFichier, setColonnesEmplacementFichier] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [progression, setProgression] = useState({ actuel: 0, total: 0 });
   const [resultat, setResultat] = useState<string | null>(null);
+  const [resultatErreur, setResultatErreur] = useState(false);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  async function exporterTable(
-    type: string,
-    nomAffiche: string,
-    table: string,
-    select: string,
-    mapper: (row: Record<string, unknown>) => Record<string, unknown>,
-    champTotal?: string
-  ) {
-    setExportingType(type);
-    const { data } = await supabase.from(table).select(select);
-    if (data) {
-      const lignesExport = (data as unknown as Record<string, unknown>[]).map(mapper);
-      if (champTotal && lignesExport.length > 0) {
-        const total = lignesExport.reduce(
-          (s, l) => s + (Number(l[champTotal]) || 0),
-          0
-        );
-        const ligneTotal: Record<string, unknown> = {};
-        for (const cle of Object.keys(lignesExport[0])) ligneTotal[cle] = "";
-        ligneTotal[Object.keys(lignesExport[0])[0]] = "TOTAL";
-        ligneTotal[champTotal] = total;
-        lignesExport.push(ligneTotal);
-      }
-      await exporterExcelMisEnForme(
-        `Export_${nomAffiche.replace(/\s+/g, "_")}_Onyx_Pharm`,
-        nomAffiche,
-        lignesExport.length > 0 ? Object.keys(lignesExport[0]) : [],
-        lignesExport
-      );
-    }
-    setExportingType(null);
-  }
 
   function telechargerModele() {
     const emplacementsActifs = emplacements.filter((e) => e.actif);
@@ -287,6 +258,7 @@ export function ImportExportManager() {
     let reussies = 0;
     let echouees = 0;
     let totalQuantiteImportee = 0;
+    const erreursEmplacement: string[] = [];
 
     for (const [indexBoucle, ligne] of Array.from(valides.entries())) {
       setProgression({ actuel: indexBoucle + 1, total: valides.length });
@@ -303,6 +275,15 @@ export function ImportExportManager() {
             .select("id, nom")
             .single();
           return data;
+        },
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("categories")
+            .select("id, nom")
+            .ilike("nom", nomSaisi)
+            .limit(1)
+            .maybeSingle();
+          return data;
         }
       );
 
@@ -317,6 +298,16 @@ export function ImportExportManager() {
                 .select("id, nom, categorie_id")
                 .single();
               return data;
+            },
+            async (nomSaisi) => {
+              const { data } = await supabase
+                .from("sous_categories")
+                .select("id, nom, categorie_id")
+                .eq("categorie_id", categorieId)
+                .ilike("nom", nomSaisi)
+                .limit(1)
+                .maybeSingle();
+              return data;
             }
           )
         : null;
@@ -330,6 +321,15 @@ export function ImportExportManager() {
             .insert({ nom: nomSaisi })
             .select("id, nom")
             .single();
+          return data;
+        },
+        async (nomSaisi) => {
+          const { data } = await supabase
+            .from("fournisseurs")
+            .select("id, nom")
+            .ilike("nom", nomSaisi)
+            .limit(1)
+            .maybeSingle();
           return data;
         }
       );
@@ -390,9 +390,21 @@ export function ImportExportManager() {
               .select("id, nom")
               .single();
             return data;
+          },
+          async (nomSaisi) => {
+            const { data } = await supabase
+              .from("emplacements")
+              .select("id, nom")
+              .ilike("nom", nomSaisi)
+              .limit(1)
+              .maybeSingle();
+            return data;
           }
         );
-        if (!emplacementId) continue;
+        if (!emplacementId) {
+          erreursEmplacement.push(nomColonne);
+          continue;
+        }
 
         const { error: stockErr } = await supabase.rpc(
           "ajouter_quantite_stock",
@@ -409,6 +421,7 @@ export function ImportExportManager() {
             stockErr,
             ""
           );
+          erreursEmplacement.push(`${nomColonne} (${designation})`);
           continue;
         }
         const { error: mouvementErr } = await supabase.from("mouvements_stock").insert({
@@ -434,10 +447,14 @@ export function ImportExportManager() {
     }
 
     setImporting(false);
+    setResultatErreur(echouees > 0 || erreursEmplacement.length > 0);
     setResultat(
       `${reussies} article(s) importé(s) avec succès${
         echouees > 0 ? `, ${echouees} échec(s)` : ""
-      } — ${totalQuantiteImportee} unité(s) au total réparties dans le stock.`
+      } — ${totalQuantiteImportee} unité(s) au total réparties dans le stock.` +
+        (erreursEmplacement.length > 0
+          ? ` ⚠️ ${erreursEmplacement.length} quantité(s) N'ONT PAS pu être enregistrées (emplacement introuvable ou erreur) : ${erreursEmplacement.slice(0, 5).join(", ")}${erreursEmplacement.length > 5 ? "..." : ""}`
+          : "")
     );
     setLignes([]);
     setColonnesEmplacementFichier([]);
@@ -450,11 +467,12 @@ export function ImportExportManager() {
   return (
     <div>
       <h1 className="text-xl font-semibold text-onyx-900 sm:text-2xl">
-        Import / Export
+        Stock de départ
       </h1>
       <p className="mt-1 text-sm text-onyx-500">
-        Exportez vos données en Excel, ou importez une liste d&apos;articles,
-        de ventes, de clients ou de fournisseurs.
+        Pour la mise en place initiale du catalogue — ce que vous
+        possédiez déjà avant d&apos;utiliser le site. Pour un nouvel
+        arrivage, utilisez plutôt Stock &gt; Commandes.
       </p>
 
       <div className="mt-6 rounded-xl border border-onyx-100 bg-white p-4">
@@ -481,102 +499,6 @@ export function ImportExportManager() {
           >
             <Download size={14} />
             Articles
-          </SecondaryButton>
-
-          <SecondaryButton
-            onClick={() =>
-              exporterTable(
-                "ventes",
-                "Ventes",
-                "ventes",
-                "reference, date_vente, montant_total, montant_paye, statut",
-                (r) => ({
-                  Référence: r.reference,
-                  Date: r.date_vente,
-                  Total: r.montant_total,
-                  Payé: r.montant_paye,
-                  Statut: r.statut,
-                }),
-                "Total"
-              )
-            }
-            loading={exportingType === "ventes"}
-            className="min-h-0 px-3 py-1.5 text-xs"
-          >
-            <Download size={14} />
-            Ventes
-          </SecondaryButton>
-
-          <SecondaryButton
-            onClick={() =>
-              exporterTable(
-                "conteneurs",
-                "Commandes",
-                "conteneurs",
-                "code, date_arrivee, montant_achat_global, montant_paye, statut",
-                (r) => ({
-                  Code: r.code,
-                  Date: r.date_arrivee,
-                  "Montant d'achat": r.montant_achat_global,
-                  Payé: r.montant_paye,
-                  Statut: r.statut,
-                }),
-                "Montant d'achat"
-              )
-            }
-            loading={exportingType === "conteneurs"}
-            className="min-h-0 px-3 py-1.5 text-xs"
-          >
-            <Download size={14} />
-            Commandes
-          </SecondaryButton>
-
-          <SecondaryButton
-            onClick={() =>
-              exporterTable(
-                "encaissements",
-                "Encaissements",
-                "encaissements",
-                "reference, date_operation, montant, categorie, description",
-                (r) => ({
-                  Référence: r.reference,
-                  Date: r.date_operation,
-                  Montant: r.montant,
-                  Catégorie: r.categorie,
-                  Description: r.description,
-                }),
-                "Montant"
-              )
-            }
-            loading={exportingType === "encaissements"}
-            className="min-h-0 px-3 py-1.5 text-xs"
-          >
-            <Download size={14} />
-            Encaissements
-          </SecondaryButton>
-
-          <SecondaryButton
-            onClick={() =>
-              exporterTable(
-                "decaissements",
-                "Décaissements",
-                "decaissements",
-                "reference, date_operation, montant, categorie, description",
-                (r) => ({
-                  Référence: r.reference,
-                  Date: r.date_operation,
-                  Montant: r.montant,
-                  Catégorie: r.categorie,
-                  Description: r.description,
-                }),
-                "Montant"
-              )
-            }
-            loading={exportingType === "decaissements"}
-            className="min-h-0 px-3 py-1.5 text-xs"
-          >
-            <Download size={14} />
-            Décaissements
           </SecondaryButton>
         </div>
       </div>
@@ -624,7 +546,7 @@ export function ImportExportManager() {
         )}
         {resultat && (
           <div className="mt-3">
-            <InlineBanner type="success" message={resultat} />
+            <InlineBanner type={resultatErreur ? "error" : "success"} message={resultat} />
           </div>
         )}
 
@@ -718,14 +640,6 @@ export function ImportExportManager() {
             </div>
           </div>
         )}
-      </div>
-
-      <div className="mt-6">
-        <ImportVentesSection />
-      </div>
-
-      <div className="mt-6">
-        <ImportTiersSection />
       </div>
     </div>
   );

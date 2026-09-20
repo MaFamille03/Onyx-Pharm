@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, ArrowLeft, Pencil, Trash2, CreditCard, XCircle, Printer } from "lucide-react";
+import { Plus, ArrowLeft, Pencil, Trash2, CreditCard, XCircle, Printer, FileSpreadsheet, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { Modal } from "@/components/ui/Modal";
@@ -13,8 +13,11 @@ import { ClientSelect } from "@/components/tiers/ClientSelect";
 import { ConteneurLigneSelect } from "@/components/conteneurs/ConteneurLigneSelect";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
+import { useExporterTable } from "@/lib/hooks/useExporterTable";
 import { PinModal } from "@/components/securite/PinModal";
 import { DocumentImprimable } from "@/components/documents/DocumentImprimable";
+import { ProformaPrintable } from "@/components/documents/ProformaPrintable";
+import { ImportVentesSection } from "@/components/import-export/ImportVentesSection";
 
 type VenteRow = {
   id: string;
@@ -109,6 +112,8 @@ function ListeVentes({
   const supabase = createClient();
   const [ventes, setVentes] = useState<VenteRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [outilsOuverts, setOutilsOuverts] = useState(false);
+  const { exportingType, exporterTable } = useExporterTable();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,11 +145,51 @@ function ListeVentes({
             Ventes multi-articles et paiements.
           </p>
         </div>
-        <PrimaryButton onClick={onCreate} className="shrink-0">
-          <Plus size={17} />
-          Nouvelle vente
-        </PrimaryButton>
+        <div className="flex shrink-0 gap-2">
+          <SecondaryButton onClick={() => setOutilsOuverts((v) => !v)}>
+            <FileSpreadsheet size={16} />
+            Importer / Exporter
+          </SecondaryButton>
+          <PrimaryButton onClick={onCreate}>
+            <Plus size={17} />
+            Nouvelle vente
+          </PrimaryButton>
+        </div>
       </div>
+
+      {outilsOuverts && (
+        <div className="mt-4 space-y-4">
+          <div className="rounded-xl border border-onyx-100 bg-white p-4">
+            <h2 className="text-sm font-semibold text-onyx-800">Exporter</h2>
+            <div className="mt-3">
+              <SecondaryButton
+                onClick={() =>
+                  exporterTable(
+                    "ventes",
+                    "Ventes",
+                    "ventes",
+                    "reference, date_vente, montant_total, montant_paye, statut",
+                    (r) => ({
+                      Référence: r.reference,
+                      Date: r.date_vente,
+                      Total: r.montant_total,
+                      Payé: r.montant_paye,
+                      Statut: r.statut,
+                    }),
+                    "Total"
+                  )
+                }
+                loading={exportingType === "ventes"}
+                className="min-h-0 px-3 py-1.5 text-xs"
+              >
+                <Download size={14} />
+                Ventes
+              </SecondaryButton>
+            </div>
+          </div>
+          <ImportVentesSection />
+        </div>
+      )}
 
       <div className="mt-5">
         {loading ? (
@@ -717,6 +762,114 @@ function NouvelleVente({
   );
 }
 
+function ProformaOptionsModal({
+  onClose,
+  onConfirm,
+}: {
+  onClose: () => void;
+  onConfirm: (options: {
+    delaiLivraison: string;
+    modeLivraison: string;
+    modalitePaiement: string;
+    validiteOffre: string;
+    fraisPort: string;
+  }) => void;
+}) {
+  const [delaiLivraison, setDelaiLivraison] = useState("À réception du paiement");
+  const [modeLivraison, setModeLivraison] = useState("");
+  const [modalitePaiement, setModalitePaiement] = useState("");
+  const [validiteOffre, setValiditeOffre] = useState("");
+  const [fraisPort, setFraisPort] = useState("");
+
+  return (
+    <Modal title="Détails du proforma" onClose={onClose}>
+      <p className="mb-4 text-sm text-onyx-500">
+        Ces informations sont facultatives et n&apos;apparaissent que sur ce
+        document — elles ne modifient rien sur la vente elle-même.
+      </p>
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+            Délai de livraison
+          </label>
+          <input
+            value={delaiLivraison}
+            onChange={(e) => setDelaiLivraison(e.target.value)}
+            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+            Mode de livraison
+          </label>
+          <input
+            value={modeLivraison}
+            onChange={(e) => setModeLivraison(e.target.value)}
+            placeholder="Ex : Retrait, DHL..."
+            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+            Modalité de paiement
+          </label>
+          <input
+            value={modalitePaiement}
+            onChange={(e) => setModalitePaiement(e.target.value)}
+            placeholder="Ex : 30 jours, à la commande..."
+            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+            Offre valable jusqu&apos;au
+          </label>
+          <input
+            type="date"
+            value={validiteOffre}
+            onChange={(e) => setValiditeOffre(e.target.value)}
+            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
+            Frais de port (FCFA)
+          </label>
+          <input
+            type="number"
+            min="0"
+            value={fraisPort}
+            onChange={(e) => setFraisPort(e.target.value)}
+            placeholder="0"
+            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          />
+        </div>
+      </div>
+      <div className="mt-5 flex gap-3">
+        <SecondaryButton onClick={onClose} className="flex-1">
+          Annuler
+        </SecondaryButton>
+        <PrimaryButton
+          onClick={() =>
+            onConfirm({
+              delaiLivraison,
+              modeLivraison,
+              modalitePaiement,
+              validiteOffre: validiteOffre
+                ? new Date(validiteOffre).toLocaleDateString("fr-FR")
+                : "",
+              fraisPort,
+            })
+          }
+          className="flex-1"
+        >
+          Générer le proforma
+        </PrimaryButton>
+      </div>
+    </Modal>
+  );
+}
+
 function VenteDetail({
   venteId,
   onBack,
@@ -755,6 +908,14 @@ function VenteDetail({
   const [annulationModalOpen, setAnnulationModalOpen] = useState(false);
   const [impressionOpen, setImpressionOpen] = useState(false);
   const [proformaOpen, setProformaOpen] = useState(false);
+  const [proformaAfficher, setProformaAfficher] = useState(false);
+  const [proformaOptions, setProformaOptions] = useState({
+    delaiLivraison: "",
+    modeLivraison: "",
+    modalitePaiement: "",
+    validiteOffre: "",
+    fraisPort: "",
+  });
   const [suppressionBrouillonOpen, setSuppressionBrouillonOpen] = useState(false);
   const [reouvertureOpen, setReouvertureOpen] = useState(false);
   const [suppressionValideeOpen, setSuppressionValideeOpen] = useState(false);
@@ -1008,7 +1169,7 @@ function VenteDetail({
           )}
           <SecondaryButton onClick={() => setProformaOpen(true)}>
             <Printer size={16} />
-            Télécharger le proforma (papier à en-tête)
+            Télécharger le proforma
           </SecondaryButton>
           {vente.statut !== "Brouillon" && vente.statut !== "Annulé" && (
             <SecondaryButton onClick={() => setReouvertureOpen(true)}>
@@ -1283,21 +1444,31 @@ function VenteDetail({
       )}
 
       {proformaOpen && (
-        <DocumentImprimable
-          typeDocument="Facture Proforma"
+        <ProformaOptionsModal
+          onClose={() => setProformaOpen(false)}
+          onConfirm={(options) => {
+            setProformaOptions(options);
+            setProformaOpen(false);
+            setProformaAfficher(true);
+          }}
+        />
+      )}
+
+      {proformaAfficher && (
+        <ProformaPrintable
           reference={vente.reference}
-          date={vente.date_vente}
-          tiersLabel="Client"
-          tiersNom={vente.clients?.nom}
+          clientNom={vente.clients?.nom}
+          delaiLivraison={proformaOptions.delaiLivraison}
+          modeLivraison={proformaOptions.modeLivraison}
+          modalitePaiement={proformaOptions.modalitePaiement}
+          validiteOffre={proformaOptions.validiteOffre}
+          fraisPort={Number(proformaOptions.fraisPort) || 0}
           lignes={lignes.map((l) => ({
             designation: l.articles?.designation ?? "",
             quantite: l.quantite,
-            prixUnitaire: l.prix_vente_reel,
-            montant: l.montant_ligne,
+            prixUnitaireHT: l.prix_vente_reel,
           }))}
-          montantTotal={vente.montant_total}
-          papierEntete
-          onClose={() => setProformaOpen(false)}
+          onClose={() => setProformaAfficher(false)}
         />
       )}
     </div>

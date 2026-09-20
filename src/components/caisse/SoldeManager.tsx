@@ -19,7 +19,7 @@ import { SelectField } from "@/components/ui/FormControls";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
 
-type Periode = "tout" | "aujourdhui" | "semaine" | "mois";
+type Periode = "tout" | "aujourdhui" | "semaine" | "mois" | "mois_choisi";
 
 type LigneCaisse = {
   id: string;
@@ -50,12 +50,19 @@ function debutPeriode(periode: Periode): string | null {
   return null;
 }
 
+const NOMS_MOIS = [
+  "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+  "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+];
+
 export function SoldeManager() {
   const supabase = createClient();
   const [soldeInitial, setSoldeInitial] = useState(0);
   const [lignes, setLignes] = useState<LigneCaisse[]>([]);
   const [loading, setLoading] = useState(true);
   const [periode, setPeriode] = useState<Periode>("tout");
+  const [moisChoisi, setMoisChoisi] = useState(new Date().getMonth());
+  const [anneeChoisie, setAnneeChoisie] = useState(new Date().getFullYear());
 
   const [modalSoldeOpen, setModalSoldeOpen] = useState(false);
   const [nouveauSolde, setNouveauSolde] = useState("");
@@ -81,7 +88,12 @@ export function SoldeManager() {
     let decQuery = supabase
       .from("decaissements")
       .select("id, reference, date_operation, montant, description, categorie");
-    if (debut) {
+    if (periode === "mois_choisi") {
+      const debutMois = new Date(anneeChoisie, moisChoisi, 1).toISOString().slice(0, 10);
+      const finMois = new Date(anneeChoisie, moisChoisi + 1, 1).toISOString().slice(0, 10);
+      encQuery = encQuery.gte("date_operation", debutMois).lt("date_operation", finMois);
+      decQuery = decQuery.gte("date_operation", debutMois).lt("date_operation", finMois);
+    } else if (debut) {
       encQuery = encQuery.gte("date_operation", debut);
       decQuery = decQuery.gte("date_operation", debut);
     }
@@ -127,7 +139,7 @@ export function SoldeManager() {
     if (paramRes.data?.valeur) setSoldeInitial(Number(paramRes.data.valeur) || 0);
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periode]);
+  }, [periode, moisChoisi, anneeChoisie]);
 
   useEffect(() => {
     load();
@@ -329,6 +341,7 @@ export function SoldeManager() {
             { id: "aujourdhui", label: "Aujourd'hui" },
             { id: "semaine", label: "Cette semaine" },
             { id: "mois", label: "Ce mois" },
+            { id: "mois_choisi", label: "Mois précis" },
           ] as { id: Periode; label: string }[]
         ).map((p) => (
           <button
@@ -344,6 +357,36 @@ export function SoldeManager() {
           </button>
         ))}
       </div>
+
+      {periode === "mois_choisi" && (
+        <div className="mt-3 flex gap-2">
+          <select
+            value={moisChoisi}
+            onChange={(e) => setMoisChoisi(Number(e.target.value))}
+            className="rounded-lg border border-onyx-200 bg-white px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          >
+            {NOMS_MOIS.map((nom, i) => (
+              <option key={i} value={i}>
+                {nom}
+              </option>
+            ))}
+          </select>
+          <select
+            value={anneeChoisie}
+            onChange={(e) => setAnneeChoisie(Number(e.target.value))}
+            className="rounded-lg border border-onyx-200 bg-white px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          >
+            {Array.from({ length: 8 }).map((_, i) => {
+              const annee = new Date().getFullYear() - 5 + i;
+              return (
+                <option key={annee} value={annee}>
+                  {annee}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
 
       {loading ? (
         <p className="py-10 text-center text-sm text-onyx-400">

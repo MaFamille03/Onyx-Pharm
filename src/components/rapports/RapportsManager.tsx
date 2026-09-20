@@ -322,15 +322,24 @@ function RapportStock() {
           colonnes={[
             { label: "Article", cle: "designation" },
             { label: "Catégorie", cle: "categorie" },
+            ...emplacementsActifs.map((e) => ({
+              label: e.nom,
+              cle: `empl_${e.id}`,
+              align: "right" as const,
+            })),
             { label: "Total", cle: "total", align: "right" },
-            { label: "Seuil", cle: "seuil", align: "right" },
           ]}
-          lignes={lignes.map((l) => ({
-            designation: l.designation,
-            categorie: l.categorie || "—",
-            total: l.total,
-            seuil: l.stockMinimum,
-          }))}
+          lignes={lignes.map((l) => {
+            const ligne: Record<string, string | number> = {
+              designation: l.designation,
+              categorie: l.categorie || "—",
+              total: l.total,
+            };
+            for (const e of emplacementsActifs) {
+              ligne[`empl_${e.id}`] = l.parEmplacement[e.id] || 0;
+            }
+            return ligne;
+          })}
           totalLabel="Total général"
           totalValeur={lignes.reduce((s, l) => s + l.total, 0)}
           onClose={() => setImpressionOuverte(false)}
