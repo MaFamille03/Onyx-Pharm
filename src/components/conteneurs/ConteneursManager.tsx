@@ -253,7 +253,7 @@ function ListeConteneurs({
 
 export function NouveauConteneur({ onDone }: { onDone: () => void }) {
   const supabase = createClient();
-  const { emplacements, categories, sousCategories, statutsArticle } =
+  const { emplacements, categories, sousCategories, statutsArticle, loading: refDataLoading } =
     useReferenceData();
   const emplacementsActifs = emplacements.filter((e) => e.actif);
 
@@ -326,6 +326,14 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
 
   function telechargerModele() {
     const emplacementsActifsModele = emplacements.filter((e) => e.actif);
+    if (emplacementsActifsModele.length === 0) {
+      setError(
+        refDataLoading
+          ? "Les emplacements sont encore en cours de chargement — patientez un instant puis réessayez."
+          : "Aucun emplacement actif trouvé dans Paramètres > Emplacements. Créez-en au moins un avant de télécharger le modèle."
+      );
+      return;
+    }
     const colonnes = [
       ...COLONNES_AVANT_EMPLACEMENT,
       ...emplacementsActifsModele.map((e) => e.nom),
@@ -787,9 +795,14 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
           </p>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <SecondaryButton onClick={telechargerModele} type="button" className="min-h-0 px-3 py-1.5 text-xs">
+            <SecondaryButton
+              onClick={telechargerModele}
+              type="button"
+              disabled={refDataLoading}
+              className="min-h-0 px-3 py-1.5 text-xs"
+            >
               <FileSpreadsheet size={14} />
-              Télécharger le modèle
+              {refDataLoading ? "Chargement des emplacements..." : "Télécharger le modèle"}
             </SecondaryButton>
             <label className="flex min-h-0 cursor-pointer items-center gap-1.5 rounded-lg border border-onyx-200 px-3 py-1.5 text-xs font-medium text-onyx-700 hover:bg-onyx-50">
               <Upload size={14} />

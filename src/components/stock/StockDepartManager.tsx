@@ -56,7 +56,7 @@ type LigneImport = {
  */
 export function StockDepartManager() {
   const supabase = createClient();
-  const { categories, sousCategories, fournisseurs, emplacements, statutsArticle } =
+  const { categories, sousCategories, fournisseurs, emplacements, statutsArticle, loading: refDataLoading } =
     useReferenceData();
   const { exportingType, exporterTable } = useExporterTable();
 
@@ -71,6 +71,14 @@ export function StockDepartManager() {
 
   function telechargerModele() {
     const emplacementsActifs = emplacements.filter((e) => e.actif);
+    if (emplacementsActifs.length === 0) {
+      setErreurGenerale(
+        refDataLoading
+          ? "Les emplacements sont encore en cours de chargement — patientez un instant puis réessayez."
+          : "Aucun emplacement actif trouvé dans Paramètres > Emplacements. Créez-en au moins un avant de télécharger le modèle."
+      );
+      return;
+    }
     const colonnes = [
       ...COLONNES_AVANT_EMPLACEMENT,
       ...emplacementsActifs.map((e) => e.nom),
@@ -518,10 +526,13 @@ export function StockDepartManager() {
         <div className="mt-3 flex flex-wrap gap-2">
           <SecondaryButton
             onClick={telechargerModele}
+            disabled={refDataLoading}
             className="min-h-0 px-3 py-1.5 text-xs"
           >
             <FileSpreadsheet size={14} />
-            Télécharger le modèle Excel
+            {refDataLoading
+              ? "Chargement des emplacements..."
+              : "Télécharger le modèle Excel"}
           </SecondaryButton>
           <SecondaryButton
             onClick={() => fileInputRef.current?.click()}
