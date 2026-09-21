@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Download,
   Upload,
@@ -68,6 +68,53 @@ export function StockDepartManager() {
   const [resultatErreur, setResultatErreur] = useState(false);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  type LigneHistorique = {
+    reference_document: string;
+    created_at: string;
+    designation: string;
+    emplacement_nom: string;
+    quantite: number;
+  };
+  const [historique, setHistorique] = useState<LigneHistorique[]>([]);
+  const [historiqueOuvert, setHistoriqueOuvert] = useState<string | null>(null);
+  const [historiqueLoading, setHistoriqueLoading] = useState(false);
+
+  async function chargerHistorique() {
+    setHistoriqueLoading(true);
+    const { data } = await supabase
+      .from("mouvements_stock")
+      .select(
+        "reference_document, created_at, quantite, articles(designation), emplacements(nom)"
+      )
+      .eq("document_type", "import_excel")
+      .not("reference_document", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (data) {
+      setHistorique(
+        (data as unknown as {
+          reference_document: string;
+          created_at: string;
+          quantite: number;
+          articles: { designation: string } | null;
+          emplacements: { nom: string } | null;
+        }[]).map((l) => ({
+          reference_document: l.reference_document,
+          created_at: l.created_at,
+          designation: l.articles?.designation ?? "—",
+          emplacement_nom: l.emplacements?.nom ?? "—",
+          quantite: l.quantite,
+        }))
+      );
+    }
+    setHistoriqueLoading(false);
+  }
+
+  useEffect(() => {
+    chargerHistorique();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function telechargerModele() {
     const emplacementsActifs = emplacements.filter((e) => e.actif);
@@ -254,6 +301,10 @@ export function StockDepartManager() {
       data: { user },
     } = await supabase.auth.getUser();
     const stockInitialId = await getStockInitialId(supabase);
+    // Une seule référence pour tout cet import — permet de retrouver
+    // exactement ce qui a été importé ensemble, à tout moment, même
+    // après que le stock ait bougé depuis (ventes, corrections...).
+    const referenceImport = `IMPORT-${new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14)}`;
 
     // Copies de travail : ce qui est créé pendant cet import s'y ajoute
     // au fur et à mesure, pour que les lignes suivantes du même fichier
@@ -438,6 +489,7 @@ export function StockDepartManager() {
           type: "autre_entree",
           quantite,
           document_type: "import_excel",
+          reference_document: referenceImport,
           observation: `Import Excel initial — ${nomColonne}`,
           created_by: user?.id ?? null,
         });
@@ -459,7 +511,7 @@ export function StockDepartManager() {
     setResultat(
       `${reussies} article(s) importé(s) avec succès${
         echouees > 0 ? `, ${echouees} échec(s)` : ""
-      } — ${totalQuantiteImportee} unité(s) au total réparties dans le stock.` +
+      } — ${totalQuantiteImportee} unité(s) au total réparties dans le stock. Référence de cet import : ${referenceImport} (retrouvable ci-dessous, à tout moment).` +
         (erreursEmplacement.length > 0
           ? ` ⚠️ ${erreursEmplacement.length} quantité(s) N'ONT PAS pu être enregistrées (emplacement introuvable ou erreur) : ${erreursEmplacement.slice(0, 5).join(", ")}${erreursEmplacement.length > 5 ? "..." : ""}`
           : "")
@@ -467,6 +519,7 @@ export function StockDepartManager() {
     setLignes([]);
     setColonnesEmplacementFichier([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    chargerHistorique();
   }
 
   const nbValides = lignes.filter((l) => l.valide).length;
@@ -649,6 +702,83 @@ export function StockDepartManager() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-onyx-100 bg-white p-4">
+        <h2 className="text-sm font-semibold text-onyx-800">
+          Historique de mes imports
+        </h2>
+        <p className="mt-1 text-xs text-onyx-400">
+          Exactement ce qui a été importé, à chaque fois — figé pour
+          toujours, même si le stock a changé depuis (ventes,
+          corrections...). Ce n&apos;est pas le stock actuel.
+        </p>
+
+        {historiqueLoading ? (
+          <p className="mt-3 text-sm text-onyx-400">Chargement...</p>
+        ) : historique.length === 0 ? (
+          <p className="mt-3 text-sm text-onyx-400">
+            Aucun import effectué pour le moment.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {Array.from(new Set(historique.map((l) => l.reference_document)))
+              .map((ref) => {
+                const lignesRef = historique.filter((l) => l.reference_document === ref);
+                const totalRef = lignesRef.reduce((s, l) => s + l.quantite, 0);
+                const dateRef = lignesRef[0]?.created_at;
+                const estOuvert = historiqueOuvert === ref;
+                return (
+                  <div key={ref} className="rounded-lg border border-onyx-100">
+                    <button
+                      onClick={() => setHistoriqueOuvert(estOuvert ? null : ref)}
+                      className="flex w-full items-center justify-between px-3.5 py-2.5 text-left hover:bg-onyx-50/50"
+                    >
+                      <span className="text-sm font-medium text-onyx-800">
+                        {ref}
+                      </span>
+                      <span className="text-xs text-onyx-400">
+                        {dateRef &&
+                          new Date(dateRef).toLocaleString("fr-FR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}{" "}
+                        · {lignesRef.length} ligne{lignesRef.length > 1 ? "s" : ""} ·{" "}
+                        {totalRef} unité{totalRef > 1 ? "s" : ""} au total
+                      </span>
+                    </button>
+                    {estOuvert && (
+                      <div className="border-t border-onyx-50 px-3.5 py-2">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-onyx-400">
+                              <th className="py-1.5">Article</th>
+                              <th className="py-1.5">Emplacement</th>
+                              <th className="py-1.5 text-right">Quantité</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {lignesRef.map((l, i) => (
+                              <tr key={i} className="border-t border-onyx-50">
+                                <td className="py-1.5 text-onyx-700">{l.designation}</td>
+                                <td className="py-1.5 text-onyx-500">{l.emplacement_nom}</td>
+                                <td className="py-1.5 text-right text-onyx-600">
+                                  {l.quantite}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>
