@@ -20,7 +20,7 @@ import { useExporterTable } from "@/lib/hooks/useExporterTable";
 
 // Colonnes fixes du modèle. Les emplacements s'insèrent dynamiquement
 // entre les deux groupes (une colonne par emplacement actif du site),
-// suivis de "Stock Disponible" — une colonne de contrôle qui doit
+// suivis de "Stock Disponible (contrôle uniquement)" — une colonne de contrôle qui doit
 // correspondre à la somme des emplacements, pour repérer une erreur de
 // saisie avant même d'importer.
 const COLONNES_AVANT_EMPLACEMENT = [
@@ -33,7 +33,7 @@ const COLONNES_AVANT_EMPLACEMENT = [
   "Prix de vente conseillé",
 ];
 const COLONNES_APRES_EMPLACEMENT = [
-  "Stock Disponible",
+  "Stock Disponible (contrôle uniquement)",
   "Numéro de lot",
   "Date d'expiration",
   "Statut",
@@ -91,7 +91,7 @@ export function StockDepartManager() {
       Observations: "",
     };
     // Une colonne par emplacement : la quantité de cet article s'y
-    // saisit directement, sur cette seule ligne. "Stock Disponible" est
+    // saisit directement, sur cette seule ligne. "Stock Disponible (contrôle uniquement)" est
     // une colonne de contrôle, facultative — si elle est remplie, elle
     // doit correspondre à la somme des emplacements ; sinon l'import
     // signale l'écart avant de continuer.
@@ -101,7 +101,7 @@ export function StockDepartManager() {
       ligneExemple[e.nom] = qte;
       total += qte;
     });
-    ligneExemple["Stock Disponible"] = total;
+    ligneExemple["Stock Disponible (contrôle uniquement)"] = total;
 
     exporterExcelMisEnForme("Modèle_Articles_Onyx_Pharm", "Modèle", colonnes, [
       ligneExemple,
@@ -158,19 +158,19 @@ export function StockDepartManager() {
         }
       }
 
-      // "Stock Disponible" est une colonne de contrôle facultative :
+      // "Stock Disponible (contrôle uniquement)" est une colonne de contrôle facultative :
       // si elle est remplie, elle doit correspondre exactement à la
       // somme des emplacements — sinon, c'est très probablement une
       // erreur de saisie quelque part, signalée avant d'importer quoi
       // que ce soit.
-      const stockDisponible = row["Stock Disponible"];
+      const stockDisponible = row["Stock Disponible (contrôle uniquement)"];
       if (stockDisponible !== "" && stockDisponible !== undefined) {
         const attendu = Number(stockDisponible);
         if (Number.isNaN(attendu)) {
-          erreurs.push('"Stock Disponible" invalide');
+          erreurs.push('"Stock Disponible (contrôle uniquement)" invalide');
         } else if (attendu !== sommeEmplacements) {
           erreurs.push(
-            `"Stock Disponible" (${attendu}) ne correspond pas à la somme des emplacements (${sommeEmplacements})`
+            `"Stock Disponible (contrôle uniquement)" indique ${attendu}, mais seulement ${sommeEmplacements} a été réparti dans les colonnes d'emplacement ci-dessus. Corrigez la quantité dans le bon emplacement — cette colonne ne remplace jamais la répartition, elle la vérifie.`
           );
         }
       }
@@ -202,7 +202,7 @@ export function StockDepartManager() {
         return;
       }
       // Toute colonne du fichier qui n'est ni une colonne fixe ni
-      // "Stock Disponible" est un emplacement — connu ou nouveau, peu
+      // "Stock Disponible (contrôle uniquement)" est un emplacement — connu ou nouveau, peu
       // importe : il sera créé automatiquement à l'import s'il
       // n'existe pas encore (comme pour catégorie/fournisseur).
       // Comparaison normalisée (accents/majuscules ignorés) pour

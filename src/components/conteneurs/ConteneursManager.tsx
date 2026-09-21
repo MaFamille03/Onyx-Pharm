@@ -41,7 +41,7 @@ const COLONNES_AVANT_EMPLACEMENT = [
   "Prix de vente conseillé",
 ];
 const COLONNES_APRES_EMPLACEMENT = [
-  "Quantité totale",
+  "Quantité totale (contrôle uniquement)",
   "Date d'expiration",
   "Statut",
   "Observations",
@@ -351,7 +351,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
       ligneExemple[e.nom] = qte;
       total += qte;
     });
-    ligneExemple["Quantité totale"] = total;
+    ligneExemple["Quantité totale (contrôle uniquement)"] = total;
 
     exporterExcelMisEnForme("Modèle_Commande_Onyx_Pharm", "Modèle", colonnes, [
       ligneExemple,
@@ -381,7 +381,7 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
       }
 
       // Chaque colonne d'emplacement doit être un nombre positif ou
-      // vide. "Quantité totale" est une colonne de contrôle facultative
+      // vide. "Quantité totale (contrôle uniquement)" est une colonne de contrôle facultative
       // : si remplie, elle doit correspondre à la somme des
       // emplacements — sinon l'écart est signalé avant import, comme
       // pour le modèle d'articles.
@@ -400,14 +400,14 @@ export function NouveauConteneur({ onDone }: { onDone: () => void }) {
         erreurs.push("Aucune quantité renseignée dans les emplacements");
       }
 
-      const quantiteTotale = row["Quantité totale"];
+      const quantiteTotale = row["Quantité totale (contrôle uniquement)"];
       if (quantiteTotale !== "" && quantiteTotale !== undefined) {
         const attendu = Number(quantiteTotale);
         if (Number.isNaN(attendu)) {
-          erreurs.push('"Quantité totale" invalide');
+          erreurs.push('"Quantité totale (contrôle uniquement)" invalide');
         } else if (attendu !== sommeEmplacements) {
           erreurs.push(
-            `"Quantité totale" (${attendu}) ne correspond pas à la somme des emplacements (${sommeEmplacements})`
+            `"Quantité totale (contrôle uniquement)" indique ${attendu}, mais seulement ${sommeEmplacements} a été réparti dans les colonnes d'emplacement ci-dessus. Corrigez la quantité dans le bon emplacement — cette colonne ne remplace jamais la répartition, elle la vérifie.`
           );
         }
       }
