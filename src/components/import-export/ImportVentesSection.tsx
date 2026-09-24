@@ -107,7 +107,6 @@ function similariteTexte(a: string, b: string): number {
   const communs = [...motsA].filter((mot) => motsB.has(mot)).length;
 
   const couvertureImport = motsA.size > 0 ? communs / motsA.size : 0;
-  const couvertureStock = motsB.size > 0 ? communs / motsB.size : 0;
   const jaccard = motsA.size + motsB.size - communs > 0
     ? communs / (motsA.size + motsB.size - communs)
     : 0;
