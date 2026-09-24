@@ -10,6 +10,7 @@ import { FormField } from "@/components/auth/FormField";
 import { TextareaField, SelectField } from "@/components/ui/FormControls";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
+import { Pencil, Package, Info, Search } from "lucide-react";
 import {
   useReferenceData,
   type RefEmplacement,
@@ -402,270 +403,151 @@ export function ArticleFormModal({
 
   return (
     <Modal
-      title={isEdition ? "Modifier l'article" : "Nouvel article"}
+      title={isEdition ? "Fiche article — Modification" : "Nouvel article"}
       onClose={onClose}
       wide
     >
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {error && <InlineBanner message={error} />}
+      <form onSubmit={handleSubmit} className="flex max-h-[78vh] flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {error && <div className="mb-4"><InlineBanner message={error} /></div>}
 
-        <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-2">
-          <div className="relative">
-            <FormField
-              id="designation"
-              label="Désignation"
-              required
-              value={form.designation}
-              onChange={(e) => handleDesignationChange(e.target.value)}
-              placeholder="Ex : Tensiomètre électronique X200"
-              autoComplete="off"
-            />
-            {(rechercheArticleEnCours || suggestionsArticle.length > 0) && !isEdition && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-onyx-200 bg-white shadow-lg">
-                {rechercheArticleEnCours ? (
-                  <p className="px-3 py-2.5 text-sm text-onyx-400">Recherche de correspondances...</p>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto py-1">
-                    <p className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-onyx-400">
-                      Articles correspondants — choisissez celui qui convient
-                    </p>
-                    {suggestionsArticle.map((article) => (
-                      <button
-                        key={article.id}
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => void chargerArticleExistant(article.id)}
-                        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-onyx-50"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-onyx-800">{article.designation}</span>
-                          {article.marque && <span className="block truncate text-xs text-onyx-400">{article.marque}</span>}
-                        </span>
-                        <span className="shrink-0 text-[11px] text-onyx-400">
-                          {Math.round(article.scoreCorrespondance * 100)} %
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+          {isEdition ? (
+            <div className="mb-5 flex items-start gap-3 rounded-xl border border-accent-200 bg-accent-50/60 p-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-accent-700 shadow-sm">
+                <Pencil size={17} />
               </div>
-            )}
-          </div>
-          {articleExistantDetecte && (
-            <div className="sm:col-span-2 lg:col-span-3">
-              <InlineBanner
-                type="success"
-                message='Un article portant ce nom existe déjà — ses informations ont été reprises ci-dessous. Continuez pour le modifier, ou changez le nom pour en créer un nouveau.'
-              />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-accent-700">Article sélectionné</p>
+                <h3 className="mt-0.5 truncate text-base font-semibold text-onyx-900">{form.designation}</h3>
+                <p className="mt-1 text-xs text-onyx-500">Les informations enregistrées ont été reprises. Modifiez uniquement ce que vous souhaitez changer.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-5 rounded-xl border border-onyx-100 bg-onyx-50/60 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-onyx-800"><Search size={16} /> Rechercher un article existant</div>
+              <p className="mt-1 text-xs text-onyx-500">Commencez à saisir une désignation. Les correspondances sont souples ; choisissez l'article avant de modifier ses informations.</p>
             </div>
           )}
 
-          <FormField
-            id="marque"
-            label="Marque"
-            value={form.marque}
-            onChange={(e) => setForm({ ...form, marque: e.target.value })}
-            placeholder="Optionnel"
-          />
-
-          <SelectField
-            id="categorie"
-            label="Catégorie"
-            value={form.categorie_id}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                categorie_id: e.target.value,
-                sous_categorie_id: "",
-              })
-            }
-          >
-            <option value="">— Aucune —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nom}
-              </option>
-            ))}
-          </SelectField>
-
-          <SelectField
-            id="sous-categorie"
-            label="Sous-catégorie"
-            value={form.sous_categorie_id}
-            onChange={(e) =>
-              setForm({ ...form, sous_categorie_id: e.target.value })
-            }
-            disabled={!form.categorie_id}
-          >
-            <option value="">— Aucune —</option>
-            {sousCategoriesFiltrees.map((sc) => (
-              <option key={sc.id} value={sc.id}>
-                {sc.nom}
-              </option>
-            ))}
-          </SelectField>
-
-          <SelectField
-            id="fournisseur"
-            label="Fournisseur"
-            value={form.fournisseur_id}
-            onChange={(e) =>
-              setForm({ ...form, fournisseur_id: e.target.value })
-            }
-          >
-            <option value="">— Aucun —</option>
-            {fournisseurs.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.nom}
-              </option>
-            ))}
-          </SelectField>
-
-          <SelectField
-            id="statut"
-            label="Statut"
-            value={form.statut}
-            onChange={(e) => setForm({ ...form, statut: e.target.value })}
-          >
-            {statutsArticle
-              .filter((s) => s.actif)
-              .map((s) => (
-                <option key={s.valeur} value={s.valeur}>
-                  {s.valeur}
-                </option>
-              ))}
-          </SelectField>
-          <p className="-mt-2.5 text-xs text-onyx-400">
-            Le statut indique si l&apos;article reste proposé dans les
-            ventes et achats — ce n&apos;est pas une indication de son état
-            physique. Un article solide, toujours vendu, doit rester
-            &quot;Actif&quot; même après des années.
-          </p>
-
-          <FormField
-            id="prix-vente"
-            label="Prix de vente référence"
-            type="number"
-            min="0"
-            step="1"
-            value={form.prix_vente_conseille}
-            onChange={(e) =>
-              setForm({ ...form, prix_vente_conseille: e.target.value })
-            }
-            placeholder="0"
-          />
-
-          <FormField
-            id="stock-minimum"
-            label="Stock minimum (seuil d'alerte)"
-            type="number"
-            min="0"
-            step="1"
-            value={form.stock_minimum}
-            onChange={(e) =>
-              setForm({ ...form, stock_minimum: e.target.value })
-            }
-            placeholder="0"
-          />
-          <FormField
-            id="numero-lot"
-            label="Numéro de lot"
-            value={form.numero_lot}
-            onChange={(e) =>
-              setForm({ ...form, numero_lot: e.target.value })
-            }
-            placeholder="Optionnel — si applicable"
-          />
-
-          <div className="lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-medium text-onyx-700">
-                Date d&apos;expiration
-              </label>
-              <label className="flex items-center gap-1.5 text-xs text-onyx-500">
-                <input
-                  type="checkbox"
-                  checked={!expirationApplicable}
-                  onChange={(e) => {
-                    setExpirationApplicable(!e.target.checked);
-                    if (e.target.checked) {
-                      setForm({ ...form, date_expiration: "" });
-                    }
-                  }}
-                  className="h-4 w-4 rounded border-onyx-300 text-onyx-900 focus:ring-accent-400"
-                />
-                Non applicable (ex : mobilier, équipement durable)
-              </label>
+          <section className="rounded-xl border border-onyx-100 bg-white">
+            <div className="border-b border-onyx-100 px-4 py-3">
+              <h3 className="text-sm font-semibold text-onyx-800">Identification</h3>
+              <p className="mt-0.5 text-xs text-onyx-400">Nom, marque et classification de l'article.</p>
             </div>
-            <input
-              type="date"
-              disabled={!expirationApplicable}
-              value={form.date_expiration}
-              onChange={(e) =>
-                setForm({ ...form, date_expiration: e.target.value })
-              }
-              className="mt-1.5 w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100 disabled:cursor-not-allowed disabled:bg-onyx-50 disabled:text-onyx-300"
-            />
-          </div>
-        </div>
+            <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+              <div className="relative lg:col-span-2">
+                <FormField
+                  id="designation"
+                  label="Désignation"
+                  required
+                  value={form.designation}
+                  onChange={(e) => handleDesignationChange(e.target.value)}
+                  placeholder="Ex : Tensiomètre électronique X200"
+                  autoComplete="off"
+                />
+                {(rechercheArticleEnCours || suggestionsArticle.length > 0) && !isEdition && (
+                  <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-onyx-200 bg-white shadow-xl">
+                    {rechercheArticleEnCours ? (
+                      <p className="px-3 py-2.5 text-sm text-onyx-400">Recherche de correspondances...</p>
+                    ) : (
+                      <div className="max-h-64 overflow-y-auto py-1">
+                        <p className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-onyx-400">Correspondances — choisissez l'article</p>
+                        {suggestionsArticle.map((article) => (
+                          <button
+                            key={article.id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => void chargerArticleExistant(article.id)}
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-onyx-50"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-medium text-onyx-800">{article.designation}</span>
+                              {article.marque && <span className="block truncate text-xs text-onyx-400">{article.marque}</span>}
+                            </span>
+                            <span className="shrink-0 rounded-full bg-onyx-50 px-2 py-0.5 text-[11px] font-medium text-onyx-500">{Math.round(article.scoreCorrespondance * 100)} %</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-        <TextareaField
-          id="observations"
-          label="Observations"
-          value={form.observations}
-          onChange={(e) =>
-            setForm({ ...form, observations: e.target.value })
-          }
-          placeholder="Notes internes (optionnel)"
-        />
+              {articleExistantDetecte && (
+                <div className="lg:col-span-2">
+                  <InlineBanner type="success" message="Article chargé : vous êtes maintenant en mode modification. Les données existantes ont été reprises." />
+                </div>
+              )}
 
-        {(!isEdition || stockParEmplacement !== undefined || articleExistantDetecte) && (
-          <div className="rounded-lg border border-onyx-100 bg-onyx-50/50 p-4">
-            <p className="text-sm font-medium text-onyx-700">
-              {isEdition ? "Stock par emplacement" : "Stock initial (optionnel)"}
-            </p>
-            <p className="mt-0.5 text-xs text-onyx-400">
-              {isEdition
-                ? "Corrigez directement une quantité mal saisie. Une baisse retire en priorité des commandes les plus anciennes ; une hausse s'ajoute au stock non rattaché à une commande précise."
-                : "Renseignez la quantité de départ par emplacement, si vous en avez déjà en stock."}
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {emplacementsActifs.map((empl: RefEmplacement) => (
-                <div key={empl.id}>
-                  <label className="mb-1 block text-xs font-medium text-onyx-500">
-                    {empl.nom}
+              <FormField id="marque" label="Marque" value={form.marque} onChange={(e) => setForm({ ...form, marque: e.target.value })} placeholder="Optionnel" />
+              <SelectField id="categorie" label="Catégorie" value={form.categorie_id} onChange={(e) => setForm({ ...form, categorie_id: e.target.value, sous_categorie_id: "" })}>
+                <option value="">— Aucune —</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
+              </SelectField>
+              <SelectField id="sous-categorie" label="Sous-catégorie" value={form.sous_categorie_id} onChange={(e) => setForm({ ...form, sous_categorie_id: e.target.value })} disabled={!form.categorie_id}>
+                <option value="">— Aucune —</option>
+                {sousCategoriesFiltrees.map((sc) => <option key={sc.id} value={sc.id}>{sc.nom}</option>)}
+              </SelectField>
+              <SelectField id="fournisseur" label="Fournisseur" value={form.fournisseur_id} onChange={(e) => setForm({ ...form, fournisseur_id: e.target.value })}>
+                <option value="">— Aucun —</option>
+                {fournisseurs.map((f) => <option key={f.id} value={f.id}>{f.nom}</option>)}
+              </SelectField>
+            </div>
+          </section>
+
+          <section className="mt-4 rounded-xl border border-onyx-100 bg-white">
+            <div className="border-b border-onyx-100 px-4 py-3">
+              <h3 className="text-sm font-semibold text-onyx-800">Commercial & suivi</h3>
+              <p className="mt-0.5 text-xs text-onyx-400">Prix, seuil d'alerte, statut et informations de lot.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+              <SelectField id="statut" label="Statut" value={form.statut} onChange={(e) => setForm({ ...form, statut: e.target.value })}>
+                {statutsArticle.filter((s) => s.actif).map((s) => <option key={s.valeur} value={s.valeur}>{s.valeur}</option>)}
+              </SelectField>
+              <FormField id="prix-vente" label="Prix de vente référence" type="number" min="0" step="1" value={form.prix_vente_conseille} onChange={(e) => setForm({ ...form, prix_vente_conseille: e.target.value })} placeholder="0" />
+              <FormField id="stock-minimum" label="Stock minimum (seuil d'alerte)" type="number" min="0" step="1" value={form.stock_minimum} onChange={(e) => setForm({ ...form, stock_minimum: e.target.value })} placeholder="0" />
+              <FormField id="numero-lot" label="Numéro de lot" value={form.numero_lot} onChange={(e) => setForm({ ...form, numero_lot: e.target.value })} placeholder="Optionnel — si applicable" />
+              <div className="lg:col-span-2 rounded-lg bg-onyx-50/70 p-3 text-xs text-onyx-500">
+                <div className="flex gap-2"><Info size={14} className="mt-0.5 shrink-0" /><span>Le statut indique si l'article reste proposé dans les ventes et achats. Il ne décrit pas son état physique.</span></div>
+              </div>
+              <div className="lg:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="block text-sm font-medium text-onyx-700">Date d'expiration</label>
+                  <label className="flex items-center gap-1.5 text-xs text-onyx-500">
+                    <input type="checkbox" checked={!expirationApplicable} onChange={(e) => { setExpirationApplicable(!e.target.checked); if (e.target.checked) setForm({ ...form, date_expiration: "" }); }} className="h-4 w-4 rounded border-onyx-300 text-onyx-900 focus:ring-accent-400" />
+                    Non applicable
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={stockInitial[empl.id] || ""}
-                    onChange={(e) =>
-                      setStockInitial({
-                        ...stockInitial,
-                        [empl.id]: e.target.value,
-                      })
-                    }
-                    placeholder="0"
-                    className="w-full rounded-lg border border-onyx-200 px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-                  />
+                </div>
+                <input type="date" disabled={!expirationApplicable} value={form.date_expiration} onChange={(e) => setForm({ ...form, date_expiration: e.target.value })} className="mt-1.5 w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100 disabled:cursor-not-allowed disabled:bg-onyx-50 disabled:text-onyx-300" />
+              </div>
+            </div>
+          </section>
+
+          <section className="mt-4 rounded-xl border border-onyx-100 bg-white">
+            <div className="border-b border-onyx-100 px-4 py-3">
+              <div className="flex items-center gap-2"><Package size={16} className="text-onyx-500" /><h3 className="text-sm font-semibold text-onyx-800">{isEdition ? "Stock par emplacement" : "Stock initial"}</h3></div>
+              <p className="mt-0.5 text-xs text-onyx-400">{isEdition ? "Corrigez ici les quantités existantes par emplacement." : "Renseignez les quantités déjà disponibles au démarrage."}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+              {emplacementsActifs.map((empl: RefEmplacement) => (
+                <div key={empl.id} className="rounded-lg border border-onyx-100 bg-onyx-50/40 p-3">
+                  <label className="mb-1 block text-xs font-medium text-onyx-600">{empl.nom}</label>
+                  <input type="number" min="0" step="1" value={stockInitial[empl.id] || ""} onChange={(e) => setStockInitial({ ...stockInitial, [empl.id]: e.target.value })} placeholder="0" className="w-full rounded-lg border border-onyx-200 bg-white px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100" />
+                  {isEdition && <p className="mt-1 text-[11px] text-onyx-400">Actuel : {baselineStock[empl.id] ?? 0}</p>}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          </section>
 
-        <div className="flex gap-3 pt-2">
-          <SecondaryButton type="button" onClick={onClose} className="flex-1">
-            Annuler
-          </SecondaryButton>
-          <PrimaryButton
-            type="submit"
-            loading={saving || loadingRef}
-            className="flex-1"
-          >
-            Enregistrer
-          </PrimaryButton>
+          <section className="mt-4 rounded-xl border border-onyx-100 bg-white">
+            <div className="border-b border-onyx-100 px-4 py-3"><h3 className="text-sm font-semibold text-onyx-800">Observations</h3></div>
+            <div className="p-4"><TextareaField id="observations" label="Notes internes" value={form.observations} onChange={(e) => setForm({ ...form, observations: e.target.value })} placeholder="Notes internes (optionnel)" /></div>
+          </section>
+        </div>
+
+        <div className="mt-4 flex gap-3 border-t border-onyx-100 bg-white pt-4">
+          <SecondaryButton type="button" onClick={onClose} className="flex-1">Annuler</SecondaryButton>
+          <PrimaryButton type="submit" loading={saving || loadingRef} className="flex-1">{isEdition ? "Enregistrer les modifications" : "Créer l'article"}</PrimaryButton>
         </div>
       </form>
     </Modal>

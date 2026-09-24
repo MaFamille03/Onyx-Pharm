@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ArrowRight, MapPin, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
@@ -60,6 +60,7 @@ type GroupeVente = {
   erreurs: string[];
   doublonProbable: boolean;
   valide: boolean;
+  avertissements: string[];
 };
 
 
@@ -149,7 +150,7 @@ function trouverArticle(
       article,
       score: similariteTexte(designationRecherchee, article.designation),
     }))
-    .filter((candidat) => candidat.score >= 0.78)
+    .filter((candidat) => candidat.score >= 0.58)
     .sort((a, b) => b.score - a.score);
 
   if (candidats.length === 0) return null;
@@ -160,7 +161,7 @@ function trouverArticle(
   // On refuse une correspondance approximative si deux articles sont trop
   // proches : mieux vaut demander une désignation plus précise que vendre le
   // mauvais article.
-  if (second && meilleur.score - second.score < 0.08) return null;
+  if (second && meilleur.score - second.score < 0.05) return null;
 
   return {
     article: meilleur.article,
@@ -168,6 +169,25 @@ function trouverArticle(
     score: meilleur.score,
   };
 }
+
+function trouverEmplacementSouple(nomRecherche: string, emplacements: Array<{ id: string; nom: string }>) {
+  const recherche = normaliserDesignation(nomRecherche);
+  if (!recherche) return null;
+
+  const exact = emplacements.find((e) => normaliserDesignation(e.nom) === recherche);
+  if (exact) return { emplacement: exact, score: 1, exact: true };
+
+  const candidats = emplacements
+    .map((e) => ({ emplacement: e, score: similariteTexte(nomRecherche, e.nom) }))
+    .sort((a, b) => b.score - a.score);
+
+  const meilleur = candidats[0];
+  const second = candidats[1];
+  if (!meilleur || meilleur.score < 0.45) return null;
+  if (second && meilleur.score - second.score < 0.05) return null;
+  return { emplacement: meilleur.emplacement, score: meilleur.score, exact: false };
+}
+
 
 export function ImportVentesSection() {
   const supabase = createClient();
@@ -322,6 +342,7 @@ export function ImportVentesSection() {
         const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
+        const avertissements: string[] = [];
         const lignesResolues: LigneResolue[] = [];
 
         for (const l of lignesBrutes) {
@@ -331,11 +352,7 @@ export function ImportVentesSection() {
           const prix = Number(l["Prix de vente unitaire"]) || 0;
 
           if (!designation || !quantite || quantite <= 0) {
-            erreurs.push("Ligne incomplète (article et quantité obligatoires)");
-            continue;
-          }
-          if (!modeHistorique && !nomEmplacement) {
-            erreurs.push(`Article "${designation}" : emplacement obligatoire pour une vente récente`);
+            erreurs.push("Ligne incomplète : article et quantité sont obligatoires.");
             continue;
           }
 
@@ -363,22 +380,37 @@ export function ImportVentesSection() {
           // structure de la table lignes_ventes.
           let emplacementId: string | undefined;
           if (nomEmplacement) {
-            const emplacementTrouve = emplacements.find(
-              (e) => normaliser(e.nom) === normaliser(nomEmplacement)
-            );
-            emplacementId = emplacementTrouve?.id;
+            const emplacementTrouve = trouverEmplacementSouple(nomEmplacement, emplacements);
+            emplacementId = emplacementTrouve?.emplacement.id;
+
+            if (emplacementTrouve && !emplacementTrouve.exact) {
+              avertissements.push(
+                `Emplacement « ${nomEmplacement} » rapproché de « ${emplacementTrouve.emplacement.nom} ». Vérifiez le choix.`
+              );
+            }
+
             if (!emplacementId && !modeHistorique) {
-              erreurs.push(`Emplacement "${nomEmplacement}" introuvable pour l'article "${article.designation}"`);
-              continue;
+              // Ne bloque plus l'import : on affecte provisoirement le premier
+              // emplacement actif. L'utilisateur peut immédiatement le changer
+              // dans le tableau avant de lancer l'import.
+              const emplacementParDefaut = emplacements.find((e) => e.actif) ?? emplacements[0];
+              emplacementId = emplacementParDefaut?.id;
+              if (emplacementId) {
+                avertissements.push(
+                  `Emplacement « ${nomEmplacement} » non reconnu. Sélectionnez le bon emplacement dans la colonne Emplacement.`
+                );
+              }
             }
           }
 
           if (!emplacementId) {
-            if (!modeHistorique) {
-              erreurs.push(`Article "${article.designation}" : emplacement obligatoire pour une vente récente`);
-              continue;
+            const emplacementParDefaut = emplacements.find((e) => e.actif) ?? emplacements[0];
+            emplacementId = emplacementParDefaut?.id;
+            if (!modeHistorique && emplacementId) {
+              avertissements.push(
+                `Aucun emplacement indiqué pour « ${article.designation} ». Sélectionnez l'emplacement avant l'import.`
+              );
             }
-            emplacementId = emplacements[0]?.id;
           }
           if (!emplacementId) {
             erreurs.push("Aucun emplacement n'existe dans le système.");
@@ -395,11 +427,9 @@ export function ImportVentesSection() {
             const disponibleRestant = disponible - dejaDemande - demandeDansCetteVente;
 
             if (disponibleRestant < quantite) {
-              erreurs.push(
-                `Stock insuffisant pour "${article.designation}" à "${nomEmplacement}" ` +
-                `(disponible : ${Math.max(0, disponibleRestant)}, demandé : ${quantite})`
+              avertissements.push(
+                `Stock à vérifier pour « ${article.designation} » : ${Math.max(0, disponibleRestant)} disponible(s), ${quantite} demandé(s).`
               );
-              continue;
             }
           }
 
@@ -457,6 +487,7 @@ export function ImportVentesSection() {
           montantTotal,
           erreurs,
           doublonProbable,
+          avertissements,
           valide: erreurs.length === 0,
         });
       }
@@ -636,6 +667,22 @@ export function ImportVentesSection() {
   const nbValides = groupes.filter((g) => g.valide).length;
   const nbErreurs = groupes.length - nbValides;
   const nbDoublons = groupes.filter((g) => g.doublonProbable).length;
+  const nbAvertissements = groupes.reduce((total, g) => total + g.avertissements.length, 0);
+
+  function changerEmplacement(numero: string, indexLigne: number, emplacementId: string) {
+    setGroupes((precedents) =>
+      precedents.map((g) => {
+        if (g.numero !== numero) return g;
+        const lignes = g.lignesResolues.map((ligne, index) =>
+          index === indexLigne ? { ...ligne, emplacement_id: emplacementId } : ligne
+        );
+        const avertissements = g.avertissements.filter(
+          (a) => !a.includes('Sélectionnez le bon emplacement') && !a.includes('Rapproché de')
+        );
+        return { ...g, lignesResolues: lignes, avertissements };
+      })
+    );
+  }
 
   return (
     <div className="rounded-xl border border-onyx-100 bg-white p-5">
@@ -736,6 +783,11 @@ export function ImportVentesSection() {
                 <AlertCircle size={14} /> {nbDoublons} doublon(s) possible(s)
               </span>
             )}
+            {nbAvertissements > 0 && (
+              <span className="flex items-center gap-1 text-amber-600">
+                <AlertCircle size={14} /> {nbAvertissements} avertissement{nbAvertissements > 1 ? "s" : ""}
+              </span>
+            )}
           </div>
 
           <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-onyx-100">
@@ -761,8 +813,21 @@ export function ImportVentesSection() {
                       {g.lignesResolues.length > 0 ? (
                         <div className="space-y-1">
                           {g.lignesResolues.map((l, i) => (
-                            <div key={`${g.numero}-article-${i}`} className="leading-5">
-                              {l.designation}
+                            <div key={`${g.numero}-article-${i}`} className="rounded-md border border-onyx-100 bg-white p-2">
+                              <div className="font-medium text-onyx-700">{l.designation}</div>
+                              <div className="mt-1 flex items-center gap-2">
+                                <MapPin size={12} className="shrink-0 text-onyx-400" />
+                                <select
+                                  value={l.emplacement_id}
+                                  onChange={(e) => changerEmplacement(g.numero, i, e.target.value)}
+                                  className="w-full rounded-md border border-onyx-200 bg-white px-2 py-1 text-xs text-onyx-700 outline-none focus:border-accent-400"
+                                >
+                                  {emplacements.map((e) => (
+                                    <option key={e.id} value={e.id}>{e.nom}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="mt-1 text-[11px] text-onyx-400">Quantité : {l.quantite}</div>
                             </div>
                           ))}
                         </div>
@@ -771,31 +836,30 @@ export function ImportVentesSection() {
                       )}
                     </td>
                     <td className="px-3 py-2 align-top">
-                      {!g.valide ? (
-                        <div className="space-y-1">
+                      <div className="space-y-1.5">
+                        {g.valide ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                            <CheckCircle2 size={12} /> Prête à importer
+                          </span>
+                        ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
                             <AlertCircle size={12} /> Erreur — import bloqué
                           </span>
+                        )}
+                        {g.doublonProbable && (
+                          <div className="text-amber-600">Doublon possible : vérification recommandée.</div>
+                        )}
+                        {g.erreurs.length > 0 && (
                           <div className="max-w-md space-y-1 text-red-600">
-                            {g.erreurs.map((erreur, i) => (
-                              <div key={i} className="leading-5">
-                                {erreur}
-                              </div>
-                            ))}
+                            {g.erreurs.map((erreur, i) => <div key={i}>{erreur}</div>)}
                           </div>
-                        </div>
-                      ) : g.doublonProbable ? (
-                        <div className="space-y-1">
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">
-                            <AlertCircle size={12} /> Doublon possible — vérification recommandée
-                          </span>
-                          <div className="text-amber-600">La vente reste importable, mais vérifiez qu&apos;elle n&apos;existe pas déjà.</div>
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
-                          <CheckCircle2 size={12} /> Prête à importer
-                        </span>
-                      )}
+                        )}
+                        {g.avertissements.length > 0 && (
+                          <div className="max-w-md space-y-1 text-amber-600">
+                            {g.avertissements.map((avertissement, i) => <div key={i}>{avertissement}</div>)}
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
