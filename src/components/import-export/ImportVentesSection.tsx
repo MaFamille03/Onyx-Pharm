@@ -104,7 +104,7 @@ function similariteTexte(a: string, b: string): number {
   // On valorise donc les mots significatifs présents dans les deux textes.
   const motsA = new Set(gauche.split(" ").filter((mot) => mot.length >= 2));
   const motsB = new Set(droite.split(" ").filter((mot) => mot.length >= 2));
-  const communs = [...motsA].filter((mot) => motsB.has(mot)).length;
+  const communs = Array.from(motsA).filter((mot) => motsB.has(mot)).length;
 
   const couvertureImport = motsA.size > 0 ? communs / motsA.size : 0;
   const jaccard = motsA.size + motsB.size - communs > 0
