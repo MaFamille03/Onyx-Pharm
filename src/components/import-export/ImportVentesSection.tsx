@@ -48,6 +48,7 @@ type LigneResolue = {
   emplacement_id: string;
   quantite: number;
   prix: number;
+  problemeQuantite?: { disponible: number; demande: number };
 };
 
 type GroupeVente = {
@@ -61,6 +62,7 @@ type GroupeVente = {
   doublonProbable: boolean;
   valide: boolean;
   avertissements: string[];
+  suggestionsArticles: string[];
 };
 
 
@@ -168,6 +170,24 @@ function trouverArticle(
     type: "approx",
     score: meilleur.score,
   };
+}
+
+function trouverSuggestionsArticles(
+  designationRecherchee: string,
+  articles: ArticleImport[],
+  limite = 3
+): Array<{ article: ArticleImport; score: number }> {
+  const recherche = normaliserDesignation(designationRecherchee);
+  if (!recherche) return [];
+
+  return articles
+    .map((article) => ({
+      article,
+      score: similariteTexte(designationRecherchee, article.designation),
+    }))
+    .filter((candidat) => candidat.score >= 0.25)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limite);
 }
 
 function trouverEmplacementSouple(nomRecherche: string, emplacements: Array<{ id: string; nom: string }>) {
@@ -343,6 +363,7 @@ export function ImportVentesSection() {
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
         const avertissements: string[] = [];
+        const suggestionsArticles: string[] = [];
         const lignesResolues: LigneResolue[] = [];
 
         for (const l of lignesBrutes) {
@@ -358,10 +379,15 @@ export function ImportVentesSection() {
 
           const correspondance = trouverArticle(designation, articles);
           if (!correspondance) {
-            erreurs.push(
-              `Article "${designation}" introuvable ou correspondance ambiguë. ` +
-              `Vérifiez la désignation ou utilisez la référence exacte de l'article.`
-            );
+            const suggestions = trouverSuggestionsArticles(designation, articles);
+            if (suggestions.length > 0) {
+              erreurs.push(`Article « ${designation} » non identifié. Choisissez une proposition ci-dessous.`);
+              suggestionsArticles.push(
+                `Article demandé : ${designation}\nPropositions : ${suggestions.map((s) => s.article.designation).join("\n")}`
+              );
+            } else {
+              erreurs.push(`Article « ${designation} » introuvable. Vérifiez la désignation.`);
+            }
             continue;
           }
 
@@ -428,8 +454,20 @@ export function ImportVentesSection() {
 
             if (disponibleRestant < quantite) {
               avertissements.push(
-                `Stock à vérifier pour « ${article.designation} » : ${Math.max(0, disponibleRestant)} disponible(s), ${quantite} demandé(s).`
+                `Stock insuffisant pour « ${article.designation} » à cet emplacement.`
               );
+              lignesResolues.push({
+                article_id: article.id,
+                designation: article.designation,
+                emplacement_id: emplacementId,
+                quantite,
+                prix,
+                problemeQuantite: {
+                  disponible: Math.max(0, disponibleRestant),
+                  demande: quantite,
+                },
+              });
+              continue;
             }
           }
 
@@ -674,7 +712,9 @@ export function ImportVentesSection() {
       precedents.map((g) => {
         if (g.numero !== numero) return g;
         const lignes = g.lignesResolues.map((ligne, index) =>
-          index === indexLigne ? { ...ligne, emplacement_id: emplacementId } : ligne
+          index === indexLigne
+            ? { ...ligne, emplacement_id: emplacementId, problemeQuantite: undefined }
+            : ligne
         );
         const avertissements = g.avertissements.filter(
           (a) => !a.includes('Sélectionnez le bon emplacement') && !a.includes('Rapproché de')
@@ -827,7 +867,15 @@ export function ImportVentesSection() {
                                   ))}
                                 </select>
                               </div>
-                              <div className="mt-1 text-[11px] text-onyx-400">Quantité : {l.quantite}</div>
+                              {l.problemeQuantite && (
+                                <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-[11px] text-red-700">
+                                  <div className="font-semibold">Problème de quantité</div>
+                                  <div className="mt-0.5">
+                                    Disponible : <strong>{l.problemeQuantite.disponible}</strong> · Demandé : <strong>{l.problemeQuantite.demande}</strong>
+                                  </div>
+                                  <div className="mt-0.5">Changez l&apos;emplacement ci-dessus pour vérifier un autre stock.</div>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -852,6 +900,17 @@ export function ImportVentesSection() {
                         {g.erreurs.length > 0 && (
                           <div className="max-w-md space-y-1 text-red-600">
                             {g.erreurs.map((erreur, i) => <div key={i}>{erreur}</div>)}
+                          </div>
+                        )}
+                        {g.suggestionsArticles.length > 0 && (
+                          <div className="max-w-md rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
+                            <div className="font-semibold">Propositions d&apos;articles</div>
+                            {g.suggestionsArticles.flatMap((bloc, blocIndex) => bloc.split("\n").map((ligne, ligneIndex) => (
+                              <div key={`${blocIndex}-${ligneIndex}`} className={ligne.startsWith("Propositions :") || ligne.startsWith("Article demandé :") ? "mt-1" : "ml-2 mt-0.5"}>
+                                {ligne}
+                              </div>
+                            )))}
+                            <div className="mt-2 text-[11px] text-amber-700">Sélectionnez la bonne désignation dans votre fichier puis relancez l&apos;analyse.</div>
                           </div>
                         )}
                         {g.avertissements.length > 0 && (
