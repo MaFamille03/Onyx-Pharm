@@ -527,6 +527,7 @@ export function ImportVentesSection() {
           doublonProbable,
           avertissements,
           valide: erreurs.length === 0,
+          suggestionsArticles,
         });
       }
 
