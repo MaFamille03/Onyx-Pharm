@@ -451,7 +451,7 @@ export function ArticleFormModal({
                       <p className="px-3 py-2.5 text-sm text-onyx-400">Recherche de correspondances...</p>
                     ) : (
                       <div className="max-h-64 overflow-y-auto py-1">
-                        <p className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-onyx-400">Correspondances — choisissez l'article</p>
+                        <p className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-onyx-400">Correspondances — choisissez l&apos;article</p>
                         {suggestionsArticle.map((article) => (
                           <button
                             key={article.id}
