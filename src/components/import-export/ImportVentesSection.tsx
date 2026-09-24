@@ -49,6 +49,7 @@ type LigneResolue = {
   quantite: number;
   prix: number;
   problemeQuantite?: { disponible: number; demande: number };
+  problemeEmplacement?: string;
 };
 
 type GroupeVente = {
@@ -214,6 +215,7 @@ export function ImportVentesSection() {
   const { emplacements } = useReferenceData();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [clients, setClients] = useState<{ id: string; nom: string }[]>([]);
+  const [stockParCleImport, setStockParCleImport] = useState<Record<string, number>>({});
 
   useEffect(() => {
     supabase
@@ -330,10 +332,14 @@ export function ImportVentesSection() {
       }
 
       const stockParCle = new Map<string, number>();
+      const stockPourInterface: Record<string, number> = {};
       for (const stock of stocks) {
         const cle = `${stock.article_id}|${stock.emplacement_id}`;
-        stockParCle.set(cle, (stockParCle.get(cle) ?? 0) + Number(stock.quantite || 0));
+        const nouvelleQuantite = (stockParCle.get(cle) ?? 0) + Number(stock.quantite || 0);
+        stockParCle.set(cle, nouvelleQuantite);
+        stockPourInterface[cle] = nouvelleQuantite;
       }
+      setStockParCleImport(stockPourInterface);
 
       // Regroupe les lignes par numéro de vente.
       const parGroupe = new Map<string, LigneBrute[]>();
@@ -371,6 +377,7 @@ export function ImportVentesSection() {
           const nomEmplacement = String(l.Emplacement ?? "").trim();
           const quantite = Number(l["Quantité"]);
           const prix = Number(l["Prix de vente unitaire"]) || 0;
+          let problemeEmplacement: string | undefined;
 
           if (!designation || !quantite || quantite <= 0) {
             erreurs.push("Ligne incomplète : article et quantité sont obligatoires.");
@@ -410,9 +417,8 @@ export function ImportVentesSection() {
             emplacementId = emplacementTrouve?.emplacement.id;
 
             if (emplacementTrouve && !emplacementTrouve.exact) {
-              avertissements.push(
-                `Emplacement « ${nomEmplacement} » rapproché de « ${emplacementTrouve.emplacement.nom} ». Vérifiez le choix.`
-              );
+              problemeEmplacement = `Emplacement « ${nomEmplacement} » rapproché de « ${emplacementTrouve.emplacement.nom} ». Vérifiez le choix.`;
+              avertissements.push(problemeEmplacement);
             }
 
             if (!emplacementId && !modeHistorique) {
@@ -422,9 +428,8 @@ export function ImportVentesSection() {
               const emplacementParDefaut = emplacements.find((e) => e.actif) ?? emplacements[0];
               emplacementId = emplacementParDefaut?.id;
               if (emplacementId) {
-                avertissements.push(
-                  `Emplacement « ${nomEmplacement} » non reconnu. Sélectionnez le bon emplacement dans la colonne Emplacement.`
-                );
+                problemeEmplacement = `Emplacement « ${nomEmplacement} » non reconnu. Sélectionnez le bon emplacement.`;
+                avertissements.push(problemeEmplacement);
               }
             }
           }
@@ -433,9 +438,8 @@ export function ImportVentesSection() {
             const emplacementParDefaut = emplacements.find((e) => e.actif) ?? emplacements[0];
             emplacementId = emplacementParDefaut?.id;
             if (!modeHistorique && emplacementId) {
-              avertissements.push(
-                `Aucun emplacement indiqué pour « ${article.designation} ». Sélectionnez l'emplacement avant l'import.`
-              );
+              problemeEmplacement = `Aucun emplacement indiqué pour « ${article.designation} ». Sélectionnez l'emplacement avant l'import.`;
+              avertissements.push(problemeEmplacement);
             }
           }
           if (!emplacementId) {
@@ -466,6 +470,7 @@ export function ImportVentesSection() {
                   disponible: Math.max(0, disponibleRestant),
                   demande: quantite,
                 },
+                problemeEmplacement,
               });
               continue;
             }
@@ -477,6 +482,7 @@ export function ImportVentesSection() {
             emplacement_id: emplacementId,
             quantite,
             prix,
+            ...(problemeEmplacement ? { problemeEmplacement } : {}),
           });
         }
 
@@ -712,14 +718,56 @@ export function ImportVentesSection() {
     setGroupes((precedents) =>
       precedents.map((g) => {
         if (g.numero !== numero) return g;
+
+        const lignesSansCourante = g.lignesResolues.filter((_, index) => index !== indexLigne);
+        const ligneCourante = g.lignesResolues[indexLigne];
+        if (!ligneCourante) return g;
+
+        const cleStock = `${ligneCourante.article_id}|${emplacementId}`;
+        const disponible = stockParCleImport[cleStock] ?? 0;
+        const demandeAutresLignes = precedents.reduce((total, groupe) => {
+          return total + groupe.lignesResolues.reduce((somme, ligne) => {
+            if (ligne === ligneCourante) return somme;
+            return `${ligne.article_id}|${ligne.emplacement_id}` === cleStock
+              ? somme + ligne.quantite
+              : somme;
+          }, 0);
+        }, 0);
+        const demandeDansCetteVente = lignesSansCourante.reduce(
+          (total, ligne) =>
+            `${ligne.article_id}|${ligne.emplacement_id}` === cleStock
+              ? total + ligne.quantite
+              : total,
+          0
+        );
+        const disponibleRestant = disponible - demandeAutresLignes - demandeDansCetteVente;
+        const problemeQuantite = disponibleRestant < ligneCourante.quantite
+          ? { disponible: Math.max(0, disponibleRestant), demande: ligneCourante.quantite }
+          : undefined;
+
+        const nouvelleLigne = {
+          ...ligneCourante,
+          emplacement_id: emplacementId,
+          problemeEmplacement: undefined,
+          problemeQuantite,
+        };
+
         const lignes = g.lignesResolues.map((ligne, index) =>
-          index === indexLigne
-            ? { ...ligne, emplacement_id: emplacementId, problemeQuantite: undefined }
-            : ligne
+          index === indexLigne ? nouvelleLigne : ligne
         );
-        const avertissements = g.avertissements.filter(
-          (a) => !a.includes('Sélectionnez le bon emplacement') && !a.includes('Rapproché de')
+
+        const avertissements = g.avertissements.filter((a) =>
+          !a.includes('Sélectionnez le bon emplacement') &&
+          !a.includes('Rapproché de') &&
+          !a.includes('non reconnu') &&
+          !a.includes('Aucun emplacement indiqué') &&
+          !a.includes(`Stock insuffisant pour « ${ligneCourante.designation} »`)
         );
+
+        if (problemeQuantite) {
+          avertissements.push(`Stock insuffisant pour « ${ligneCourante.designation} » à cet emplacement.`);
+        }
+
         return { ...g, lignesResolues: lignes, avertissements };
       })
     );
@@ -852,40 +900,27 @@ export function ImportVentesSection() {
                     <td className="px-3 py-2 text-onyx-500">{g.dateVente ?? "—"}</td>
                     <td className="px-3 py-2 align-top text-onyx-500">
                       {g.lignesResolues.length > 0 ? (
-                        <div className="space-y-1">
-                          {g.lignesResolues.map((l, i) => (
-                            <div key={`${g.numero}-article-${i}`} className="rounded-md border border-onyx-100 bg-white p-2">
-                              <div className="font-medium text-onyx-700">{l.designation}</div>
-                              <div className="mt-1 flex items-center gap-2">
-                                <MapPin size={12} className="shrink-0 text-onyx-400" />
-                                <select
-                                  value={l.emplacement_id}
-                                  onChange={(e) => changerEmplacement(g.numero, i, e.target.value)}
-                                  className="w-full rounded-md border border-onyx-200 bg-white px-2 py-1 text-xs text-onyx-700 outline-none focus:border-accent-400"
-                                >
-                                  {emplacements.map((e) => (
-                                    <option key={e.id} value={e.id}>{e.nom}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              {l.problemeQuantite && (
-                                <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-[11px] text-red-700">
-                                  <div className="font-semibold">Problème de quantité</div>
-                                  <div className="mt-0.5">
-                                    Disponible : <strong>{l.problemeQuantite.disponible}</strong> · Demandé : <strong>{l.problemeQuantite.demande}</strong>
-                                  </div>
-                                  <div className="mt-0.5">Changez l&apos;emplacement ci-dessus pour vérifier un autre stock.</div>
+                        <div className="space-y-1.5">
+                          {g.lignesResolues.map((l, i) => {
+                            const attention = Boolean(l.problemeQuantite || l.problemeEmplacement);
+                            return (
+                              <div key={`${g.numero}-article-${i}`} className={`rounded-md border p-2 ${attention ? "border-amber-200 bg-amber-50/40" : "border-onyx-100 bg-white"}`}>
+                                <div className="flex items-start gap-2">
+                                  <div className="min-w-0 flex-1 font-medium text-onyx-700">{l.designation}</div>
+                                  {attention && (
+                                    <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-600" />
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         "—"
                       )}
                     </td>
                     <td className="px-3 py-2 align-top">
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {g.valide ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
                             <CheckCircle2 size={12} /> Prête à importer
@@ -895,29 +930,72 @@ export function ImportVentesSection() {
                             <AlertCircle size={12} /> Erreur — import bloqué
                           </span>
                         )}
+
                         {g.doublonProbable && (
-                          <div className="text-amber-600">Doublon possible : vérification recommandée.</div>
-                        )}
-                        {g.erreurs.length > 0 && (
-                          <div className="max-w-md space-y-1 text-red-600">
-                            {g.erreurs.map((erreur, i) => <div key={i}>{erreur}</div>)}
+                          <div className="rounded-md bg-amber-50 px-2.5 py-2 text-amber-700">
+                            <div className="font-semibold">Doublon possible</div>
+                            <div className="text-[11px]">Vérification recommandée avant l&apos;import.</div>
                           </div>
                         )}
+
+                        {g.lignesResolues.some((l) => l.problemeQuantite || l.problemeEmplacement) && (
+                          <div className="space-y-1.5">
+                            {g.lignesResolues.map((l, i) => {
+                              if (!l.problemeQuantite && !l.problemeEmplacement) return null;
+                              return (
+                                <div key={`${g.numero}-probleme-${i}`} className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800">
+                                  <div className="font-semibold text-amber-900">{l.designation}</div>
+                                  {l.problemeQuantite && (
+                                    <div className="mt-1 rounded bg-red-50 px-2 py-1.5 text-red-700">
+                                      <div className="font-semibold">Problème de quantité</div>
+                                      <div>Disponible : <strong>{l.problemeQuantite.disponible}</strong> · Demandé : <strong>{l.problemeQuantite.demande}</strong></div>
+                                      <div className="mt-0.5">Choisissez un autre emplacement ci-dessous pour vérifier un autre stock.</div>
+                                    </div>
+                                  )}
+                                  {l.problemeEmplacement && (
+                                    <div className="mt-1">{l.problemeEmplacement}</div>
+                                  )}
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <MapPin size={12} className="shrink-0 text-amber-600" />
+                                    <select
+                                      value={l.emplacement_id}
+                                      onChange={(e) => changerEmplacement(g.numero, i, e.target.value)}
+                                      className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-xs text-onyx-700 outline-none focus:border-accent-400"
+                                    >
+                                      {emplacements.map((e) => (
+                                        <option key={e.id} value={e.id}>{e.nom}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {g.erreurs.length > 0 && (
+                          <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-red-700">
+                            <div className="font-semibold">Éléments bloquants</div>
+                            <div className="mt-1 space-y-1">
+                              {g.erreurs.map((erreur, i) => <div key={i}>{erreur}</div>)}
+                            </div>
+                          </div>
+                        )}
+
                         {g.suggestionsArticles.length > 0 && (
-                          <div className="max-w-md rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
-                            <div className="font-semibold">Propositions d&apos;articles</div>
+                          <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
+                            <div className="font-semibold">Article à identifier</div>
                             {g.suggestionsArticles.flatMap((bloc, blocIndex) => bloc.split("\n").map((ligne, ligneIndex) => (
                               <div key={`${blocIndex}-${ligneIndex}`} className={ligne.startsWith("Propositions :") || ligne.startsWith("Article demandé :") ? "mt-1" : "ml-2 mt-0.5"}>
                                 {ligne}
                               </div>
                             )))}
-                            <div className="mt-2 text-[11px] text-amber-700">Sélectionnez la bonne désignation dans votre fichier puis relancez l&apos;analyse.</div>
+                            <div className="mt-2 text-[11px] text-amber-700">Corrigez le nom dans le fichier puis relancez l&apos;analyse.</div>
                           </div>
                         )}
-                        {g.avertissements.length > 0 && (
-                          <div className="max-w-md space-y-1 text-amber-600">
-                            {g.avertissements.map((avertissement, i) => <div key={i}>{avertissement}</div>)}
-                          </div>
+
+                        {g.valide && !g.doublonProbable && g.avertissements.length === 0 && (
+                          <span className="text-[11px] text-onyx-400">Aucune action requise.</span>
                         )}
                       </div>
                     </td>
