@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
+import { classerCorrespondances } from "@/lib/normaliser";
 import { getStockInitialId } from "@/lib/conteneurs";
 import { Modal } from "@/components/ui/Modal";
 import { FormField } from "@/components/auth/FormField";
@@ -82,6 +83,11 @@ export function ArticleFormModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [articleExistantDetecte, setArticleExistantDetecte] = useState(false);
+  const [suggestionsArticle, setSuggestionsArticle] = useState<
+    Array<{ id: string; designation: string; marque: string | null; scoreCorrespondance: number }>
+  >([]);
+  const [rechercheArticleEnCours, setRechercheArticleEnCours] = useState(false);
+  const rechercheArticleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isEdition = Boolean(form.id);
   const [expirationApplicable, setExpirationApplicable] = useState(
@@ -96,60 +102,101 @@ export function ArticleFormModal({
 
   const emplacementsActifs = emplacements.filter((e) => e.actif);
 
-  // En création uniquement : si le nom tapé correspond déjà à un
-  // article existant, on rapatrie toutes ses informations dans ce
-  // formulaire — pour éviter de créer un doublon sans le savoir, et
-  // permettre de continuer à le modifier directement ici.
-  async function detecterArticleExistant() {
-    if (isEdition || !form.designation.trim()) {
-      setArticleExistantDetecte(false);
-      return;
-    }
+  async function chargerArticleExistant(articleId: string) {
     const { data } = await supabase
       .from("articles")
       .select(
         "id, designation, categorie_id, sous_categorie_id, marque, fournisseur_id, stock_minimum, prix_vente_conseille, numero_lot, date_expiration, statut, observations"
       )
-      .ilike("designation", form.designation.trim())
-      .limit(1)
+      .eq("id", articleId)
       .maybeSingle();
 
-    if (data) {
-      setForm({
-        id: data.id,
-        designation: data.designation,
-        categorie_id: data.categorie_id ?? "",
-        sous_categorie_id: data.sous_categorie_id ?? "",
-        marque: data.marque ?? "",
-        fournisseur_id: data.fournisseur_id ?? "",
-        stock_minimum: String(data.stock_minimum),
-        prix_vente_conseille: String(data.prix_vente_conseille),
-        numero_lot: data.numero_lot ?? "",
-        date_expiration: data.date_expiration ?? "",
-        statut: data.statut,
-        observations: data.observations ?? "",
-      });
-      setExpirationApplicable(Boolean(data.date_expiration));
-      setArticleExistantDetecte(true);
+    if (!data) return;
 
-      const { data: stocks } = await supabase
-        .from("stocks")
-        .select("emplacement_id, quantite")
-        .eq("article_id", data.id);
-      const parEmpl: Record<string, number> = {};
-      for (const s of stocks ?? []) {
-        parEmpl[s.emplacement_id] = (parEmpl[s.emplacement_id] ?? 0) + s.quantite;
-      }
-      const init: Record<string, string> = {};
-      for (const [id, qte] of Object.entries(parEmpl)) {
-        if (qte > 0) init[id] = String(qte);
-      }
-      setStockInitial(init);
-      setBaselineStock(parEmpl);
-    } else {
-      setArticleExistantDetecte(false);
+    setForm({
+      id: data.id,
+      designation: data.designation,
+      categorie_id: data.categorie_id ?? "",
+      sous_categorie_id: data.sous_categorie_id ?? "",
+      marque: data.marque ?? "",
+      fournisseur_id: data.fournisseur_id ?? "",
+      stock_minimum: String(data.stock_minimum ?? 0),
+      prix_vente_conseille: String(data.prix_vente_conseille ?? 0),
+      numero_lot: data.numero_lot ?? "",
+      date_expiration: data.date_expiration ?? "",
+      statut: data.statut,
+      observations: data.observations ?? "",
+    });
+    setExpirationApplicable(Boolean(data.date_expiration));
+    setArticleExistantDetecte(true);
+    setSuggestionsArticle([]);
+
+    const { data: stocks } = await supabase
+      .from("stocks")
+      .select("emplacement_id, quantite")
+      .eq("article_id", data.id);
+    const parEmpl: Record<string, number> = {};
+    for (const s of stocks ?? []) {
+      parEmpl[s.emplacement_id] = (parEmpl[s.emplacement_id] ?? 0) + Number(s.quantite ?? 0);
     }
+    const init: Record<string, string> = {};
+    for (const [id, qte] of Object.entries(parEmpl)) {
+      if (qte > 0) init[id] = String(qte);
+    }
+    setStockInitial(init);
+    setBaselineStock(parEmpl);
   }
+
+  async function rechercherArticlesSimilaires(valeur: string) {
+    const recherche = valeur.trim();
+    if (isEdition || recherche.length < 2) {
+      setSuggestionsArticle([]);
+      setRechercheArticleEnCours(false);
+      return;
+    }
+
+    setRechercheArticleEnCours(true);
+    const mots = recherche
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((m) => m.length >= 2);
+    const motCle = mots.sort((a, b) => b.length - a.length)[0] ?? recherche;
+
+    const { data } = await supabase
+      .from("articles")
+      .select("id, designation, marque")
+      .ilike("designation", `%${motCle.slice(0, Math.max(3, Math.min(5, motCle.length)))}%`)
+      .order("designation")
+      .limit(80);
+
+    const classes = classerCorrespondances(
+      recherche,
+      data ?? [],
+      (a) => `${a.designation} ${a.marque ?? ""}`,
+      0.35
+    ).slice(0, 8);
+
+    setSuggestionsArticle(classes);
+    setRechercheArticleEnCours(false);
+  }
+
+  function handleDesignationChange(valeur: string) {
+    setForm((precedent) => ({ ...precedent, designation: valeur, id: isEdition ? precedent.id : undefined }));
+    setArticleExistantDetecte(false);
+    if (rechercheArticleTimer.current) clearTimeout(rechercheArticleTimer.current);
+    if (isEdition) return;
+    rechercheArticleTimer.current = setTimeout(() => {
+      void rechercherArticlesSimilaires(valeur);
+    }, 220);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (rechercheArticleTimer.current) clearTimeout(rechercheArticleTimer.current);
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -363,15 +410,47 @@ export function ArticleFormModal({
         {error && <InlineBanner message={error} />}
 
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-2">
-          <FormField
-            id="designation"
-            label="Désignation"
-            required
-            value={form.designation}
-            onChange={(e) => setForm({ ...form, designation: e.target.value })}
-            onBlur={detecterArticleExistant}
-            placeholder="Ex : Tensiomètre électronique X200"
-          />
+          <div className="relative">
+            <FormField
+              id="designation"
+              label="Désignation"
+              required
+              value={form.designation}
+              onChange={(e) => handleDesignationChange(e.target.value)}
+              placeholder="Ex : Tensiomètre électronique X200"
+              autoComplete="off"
+            />
+            {(rechercheArticleEnCours || suggestionsArticle.length > 0) && !isEdition && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-onyx-200 bg-white shadow-lg">
+                {rechercheArticleEnCours ? (
+                  <p className="px-3 py-2.5 text-sm text-onyx-400">Recherche de correspondances...</p>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    <p className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-onyx-400">
+                      Articles correspondants — choisissez celui qui convient
+                    </p>
+                    {suggestionsArticle.map((article) => (
+                      <button
+                        key={article.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => void chargerArticleExistant(article.id)}
+                        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-onyx-50"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-onyx-800">{article.designation}</span>
+                          {article.marque && <span className="block truncate text-xs text-onyx-400">{article.marque}</span>}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-onyx-400">
+                          {Math.round(article.scoreCorrespondance * 100)} %
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {articleExistantDetecte && (
             <div className="sm:col-span-2 lg:col-span-3">
               <InlineBanner

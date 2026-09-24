@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Package, User, Truck, ShoppingCart } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { classerCorrespondances } from "@/lib/normaliser";
 import { ArticleInfoPanel } from "@/components/articles/ArticleInfoPanel";
 import { TiersInfoPanel } from "@/components/tiers/TiersInfoPanel";
 import { VenteInfoPanel } from "@/components/ventes/VenteInfoPanel";
@@ -52,10 +53,18 @@ export function GlobalSearchPanel({ terme }: { terme: string }) {
     let annule = false;
     setLoading(true);
     const supabase = createClient();
+    const mots = requete
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((m) => m.length >= 2)
+      .sort((a, b) => b.length - a.length);
+    const motCleArticle = mots[0] ?? requete;
     const motif = `%${requete}%`;
 
     Promise.all([
-      supabase.from("articles").select("id, designation").ilike("designation", motif).limit(6),
+      supabase.from("articles").select("id, designation").ilike("designation", `%${motCleArticle.slice(0, Math.max(3, Math.min(5, motCleArticle.length)))}%`).limit(40),
       supabase.from("clients").select("id, nom").ilike("nom", motif).limit(6),
       supabase.from("fournisseurs").select("id, nom").ilike("nom", motif).limit(6),
       supabase
@@ -65,8 +74,15 @@ export function GlobalSearchPanel({ terme }: { terme: string }) {
         .limit(6),
     ]).then(([articlesRes, clientsRes, fournisseursRes, ventesRes]) => {
       if (annule) return;
+      const articlesClasses = classerCorrespondances(
+        requete,
+        articlesRes.data ?? [],
+        (a) => a.designation,
+        0.35
+      ).slice(0, 8);
+
       const tous: Resultat[] = [
-        ...(articlesRes.data ?? []).map((a) => ({
+        ...articlesClasses.map((a) => ({
           type: "article" as const,
           id: a.id,
           label: a.designation,

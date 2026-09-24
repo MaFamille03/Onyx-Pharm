@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, Search, Pencil, Trash2, AlertTriangle, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { classerCorrespondances } from "@/lib/normaliser";
 import { logSupabaseError } from "@/lib/errors";
 import {
   ArticleFormModal,
@@ -168,14 +169,19 @@ export function ArticlesManager({ embarque }: { embarque?: boolean } = {}) {
     [articles, delaiAlerte]
   );
 
+  const articlesCorrespondants = search.trim()
+    ? new Set(
+        classerCorrespondances(
+          search,
+          enrichis,
+          (a) => `${a.designation} ${a.marque ?? ""} ${a.categories?.nom ?? ""}`,
+          0.35
+        ).map((a) => a.id)
+      )
+    : null;
+
   const filtres = enrichis.filter((a) => {
-    if (
-      search &&
-      !`${a.designation} ${a.marque ?? ""}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    )
-      return false;
+    if (articlesCorrespondants && !articlesCorrespondants.has(a.id)) return false;
     if (filtreCategorie && a.categorie_id !== filtreCategorie) return false;
     if (filtreAlerte === "stock_faible" && !a.stockFaible) return false;
     if (
