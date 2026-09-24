@@ -90,6 +90,62 @@ function distanceLevenshtein(a: string, b: string): number {
   return prev[b.length];
 }
 
+function convertirDateImport(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  const texte = String(value).trim();
+  if (!texte) return null;
+
+  // Excel stocke fréquemment les dates sous forme de numéro sériel.
+  // Le système de date 1900 d'Excel correspond à une origine au 30/12/1899.
+  const numerique = Number(texte.replace(",", "."));
+  if (Number.isFinite(numerique) && numerique >= 1 && numerique <= 100000) {
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(numerique) * 86400000);
+    if (!Number.isNaN(date.getTime())) {
+      const y = date.getUTCFullYear();
+      const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const d = String(date.getUTCDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+  }
+
+  // Formats courants saisis dans Excel ou dans un CSV.
+  const iso = texte.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+    if (
+      date.getUTCFullYear() === Number(y) &&
+      date.getUTCMonth() === Number(m) - 1 &&
+      date.getUTCDate() === Number(d)
+    ) {
+      return `${y}-${String(Number(m)).padStart(2, "0")}-${String(Number(d)).padStart(2, "0")}`;
+    }
+  }
+
+  const fr = texte.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (fr) {
+    const [, d, m, y] = fr;
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+    if (
+      date.getUTCFullYear() === Number(y) &&
+      date.getUTCMonth() === Number(m) - 1 &&
+      date.getUTCDate() === Number(d)
+    ) {
+      return `${y}-${String(Number(m)).padStart(2, "0")}-${String(Number(d)).padStart(2, "0")}`;
+    }
+  }
+
+  return null;
+}
+
 function normaliserDesignation(texte: string): string {
   return normaliser(texte)
     .replace(/([a-z])([0-9])/g, "$1 $2")
@@ -364,7 +420,11 @@ export function ImportVentesSection() {
 
       for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
         const premiere = lignesBrutes[0];
-        const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
+        const valeurDateVente = premiere["Date de vente"];
+        const dateVente = convertirDateImport(valeurDateVente);
+        if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
+          erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
+        }
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
         const avertissements: string[] = [];
