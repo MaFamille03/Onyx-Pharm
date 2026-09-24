@@ -724,11 +724,11 @@ export function ImportVentesSection() {
               {groupes.length > 1 ? "s" : ""}
             </span>
             <span className="flex items-center gap-1 text-emerald-600">
-              <CheckCircle2 size={14} /> {nbValides} valide{nbValides > 1 ? "s" : ""}
+              <CheckCircle2 size={14} /> {nbValides} prête{nbValides > 1 ? "s" : ""} à importer
             </span>
             {nbErreurs > 0 && (
               <span className="flex items-center gap-1 text-red-500">
-                <AlertCircle size={14} /> {nbErreurs} en erreur
+                <AlertCircle size={14} /> {nbErreurs} bloquée{nbErreurs > 1 ? "s" : ""}
               </span>
             )}
             {nbDoublons > 0 && (
@@ -760,15 +760,29 @@ export function ImportVentesSection() {
                     <td className="px-3 py-2 text-onyx-500">
                       {g.lignesResolues.map((l) => l.designation).join(", ") || "—"}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 align-top">
                       {!g.valide ? (
-                        <span className="text-red-500">{g.erreurs.join(" · ")}</span>
+                        <div className="space-y-1">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
+                            <AlertCircle size={12} /> Erreur — import bloqué
+                          </span>
+                          <div className="max-w-md text-red-600">
+                            {g.erreurs.map((erreur, i) => (
+                              <div key={i}>{erreur}</div>
+                            ))}
+                          </div>
+                        </div>
                       ) : g.doublonProbable ? (
-                        <span className="text-amber-600">
-                          Doublon possible
-                        </span>
+                        <div className="space-y-1">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">
+                            <AlertCircle size={12} /> Doublon possible — vérification recommandée
+                          </span>
+                          <div className="text-amber-600">La vente reste importable, mais vérifiez qu&apos;elle n&apos;existe pas déjà.</div>
+                        </div>
                       ) : (
-                        <span className="text-emerald-600">Valide</span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                          <CheckCircle2 size={12} /> Prête à importer
+                        </span>
                       )}
                     </td>
                   </tr>

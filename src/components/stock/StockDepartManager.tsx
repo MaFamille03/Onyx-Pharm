@@ -47,6 +47,12 @@ type LigneImport = {
   valide: boolean;
 };
 
+function trouverNomReference(nomSaisi: string, valeurs: { nom: string }[]): string | null {
+  const normalise = normaliser(nomSaisi);
+  if (!normalise) return null;
+  return valeurs.find((v) => normaliser(v.nom) === normalise)?.nom ?? null;
+}
+
 /**
  * "Stock de départ" — sert uniquement à la mise en place initiale du
  * catalogue (ce qu'on possédait déjà avant d'utiliser le site), séparé
@@ -176,6 +182,7 @@ export function StockDepartManager() {
       const stockAlerte = row["Stock Alerte"];
       const prixVente = row["Prix de vente conseillé"];
       const dateExpiration = String(row["Date d'expiration"] ?? "").trim();
+      const statutSaisi = String(row["Statut"] ?? "").trim();
 
       if (!designation) erreurs.push("Désignation vide");
       if (designation && designationsExistantes.has(normaliser(designation))) {
@@ -196,11 +203,19 @@ export function StockDepartManager() {
         erreurs.push("Date d'expiration incorrecte");
       }
 
-      // Chaque colonne du fichier qui n'est pas une colonne fixe est
-      // traitée comme un emplacement — qu'il existe déjà dans
-      // Paramètres ou non (il sera créé automatiquement à l'import,
-      // comme partout ailleurs dans le site). Seule la valeur doit
-      // être un nombre positif ou vide.
+      if (statutSaisi) {
+        const statutReconnu = statutsArticle.some(
+          (s) => normaliser(s.valeur) === normaliser(statutSaisi)
+        );
+        if (!statutReconnu) {
+          erreurs.push(
+            `Statut "${statutSaisi}" inconnu. Utilisez l'un des statuts disponibles dans Paramètres > Options.`
+          );
+        }
+      }
+
+      // Les colonnes d'emplacement ont déjà été contrôlées contre les
+      // emplacements existants. Seule la quantité doit être contrôlée ici.
       let sommeEmplacements = 0;
       for (const nomColonne of colonnesEmplacement) {
         const valeur = row[nomColonne];
@@ -256,20 +271,33 @@ export function StockDepartManager() {
         setColonnesEmplacementFichier([]);
         return;
       }
-      // Toute colonne du fichier qui n'est ni une colonne fixe ni
-      // "Stock Disponible (contrôle uniquement)" est un emplacement — connu ou nouveau, peu
-      // importe : il sera créé automatiquement à l'import s'il
-      // n'existe pas encore (comme pour catégorie/fournisseur).
-      // Comparaison normalisée (accents/majuscules ignorés) pour
-      // qu'une colonne fixe légèrement mal tapée (ex : "designation"
-      // sans accent) reste bien reconnue comme fixe — et ne soit
-      // jamais prise à tort pour un emplacement à créer.
+      // Les colonnes d'emplacement doivent correspondre à un emplacement
+      // existant. Une faute de frappe ne doit JAMAIS créer silencieusement
+      // un nouvel emplacement (ex. "Entrepot" au lieu de "Entrepôt").
+      // On accepte la casse et les accents différents, mais pas un nom
+      // réellement différent.
       const colonnesFixesNormalisees = new Set(
         [...COLONNES_AVANT_EMPLACEMENT, ...COLONNES_APRES_EMPLACEMENT].map(normaliser)
       );
-      const colonnesEmplacement = colonnesFichier.filter(
+      const colonnesInconnues = colonnesFichier.filter(
         (c) => !colonnesFixesNormalisees.has(normaliser(c))
       );
+      const colonnesEmplacement: string[] = [];
+      const emplacementsInconnus: string[] = [];
+      for (const colonne of colonnesInconnues) {
+        const emplacement = trouverNomReference(colonne, emplacements);
+        if (emplacement) colonnesEmplacement.push(colonne);
+        else emplacementsInconnus.push(colonne);
+      }
+      if (emplacementsInconnus.length > 0) {
+        setErreurGenerale(
+          `Emplacement(s) inconnu(s) dans le fichier : ${emplacementsInconnus.join(", ")}. ` +
+          `Utilisez exactement les emplacements existants dans Paramètres > Emplacements, sans créer automatiquement de nouvel emplacement pendant un stock de départ.`
+        );
+        setLignes([]);
+        setColonnesEmplacementFichier([]);
+        return;
+      }
       setColonnesEmplacementFichier(colonnesEmplacement);
 
       // Vérifie aussi les articles déjà existants en base, pour éviter
@@ -429,39 +457,19 @@ export function StockDepartManager() {
         continue;
       }
 
-      // Une colonne par emplacement, telle que trouvée dans le fichier
-      // (pas seulement celles déjà connues) : celle qui n'existe pas
-      // encore dans Paramètres est créée automatiquement ici, avant
-      // d'y écrire la quantité — exactement comme catégorie ou
-      // fournisseur plus haut.
+      // Une colonne par emplacement existant. Aucune création automatique
+      // d'emplacement n'est autorisée pendant le stock de départ.
       for (const nomColonne of colonnesEmplacementFichier) {
         const valeurBrute = row[nomColonne];
         const quantite = Number(valeurBrute) || 0;
         if (quantite <= 0) continue;
 
-        const emplacementId = await trouverOuCreer(
-          nomColonne,
-          emplacementsTravail,
-          async (nomSaisi) => {
-            const { data } = await supabase
-              .from("emplacements")
-              .insert({ nom: nomSaisi })
-              .select("id, nom")
-              .single();
-            return data;
-          },
-          async (nomSaisi) => {
-            const { data } = await supabase
-              .from("emplacements")
-              .select("id, nom")
-              .ilike("nom", nomSaisi)
-              .limit(1)
-              .maybeSingle();
-            return data;
-          }
+        const emplacement = emplacementsTravail.find(
+          (e) => normaliser(e.nom) === normaliser(nomColonne)
         );
+        const emplacementId = emplacement?.id ?? null;
         if (!emplacementId) {
-          erreursEmplacement.push(nomColonne);
+          erreursEmplacement.push(`${nomColonne} (${designation})`);
           continue;
         }
 
@@ -503,7 +511,11 @@ export function StockDepartManager() {
         totalQuantiteImportee += quantite;
       }
 
-      reussies += 1;
+      if (erreursEmplacement.some((erreur) => erreur.includes(`(${designation})`))) {
+        echouees += 1;
+      } else {
+        reussies += 1;
+      }
     }
 
     setImporting(false);
@@ -572,8 +584,9 @@ export function StockDepartManager() {
           Une ligne par article. Chaque emplacement a sa propre colonne —
           indiquez-y la quantité présente à cet endroit. &quot;Stock
           Disponible&quot; est facultatif : si rempli, il doit
-          correspondre à la somme des emplacements, sinon l&apos;écart
-          est signalé avant import.
+          correspondre à la somme des emplacements. Les emplacements
+          inconnus ou mal orthographiés bloquent l&apos;import afin d&apos;éviter
+          de créer un mauvais emplacement par erreur.
         </p>
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -622,10 +635,9 @@ export function StockDepartManager() {
                 {colonnesEmplacementFichier.join(", ")}
                 <br />
                 <span className="text-xs text-accent-700">
-                  Vérifiez cette liste — c&apos;est ce qui sera créé ou
-                  utilisé comme emplacement. Une colonne mal orthographiée
-                  ici serait créée en tant que nouvel emplacement par
-                  erreur.
+                  Les noms sont rapprochés sans tenir compte des accents et
+                  de la casse. Aucun nouvel emplacement ne sera créé pendant
+                  cet import : une colonne inconnue bloque l&apos;analyse.
                 </span>
               </div>
             )}
@@ -635,11 +647,11 @@ export function StockDepartManager() {
                 {lignes.length > 1 ? "s" : ""}
               </span>
               <span className="flex items-center gap-1 text-emerald-600">
-                <CheckCircle2 size={14} /> {nbValides} valide{nbValides > 1 ? "s" : ""}
+                <CheckCircle2 size={14} /> {nbValides} prête{nbValides > 1 ? "s" : ""} à importer
               </span>
               {nbErreurs > 0 && (
                 <span className="flex items-center gap-1 text-red-500">
-                  <AlertCircle size={14} /> {nbErreurs} en erreur
+                  <AlertCircle size={14} /> {nbErreurs} bloquée{nbErreurs > 1 ? "s" : ""}
                 </span>
               )}
             </div>
@@ -662,11 +674,20 @@ export function StockDepartManager() {
                       </td>
                       <td className="px-3 py-2">
                         {l.valide ? (
-                          <span className="text-emerald-600">Valide</span>
-                        ) : (
-                          <span className="text-red-500">
-                            {l.erreurs.join(" · ")}
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                            <CheckCircle2 size={12} /> Prête à importer
                           </span>
+                        ) : (
+                          <div className="space-y-1">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
+                              <AlertCircle size={12} /> Erreur — import bloqué
+                            </span>
+                            <div className="max-w-md text-red-600">
+                              {l.erreurs.map((erreur, indexErreur) => (
+                                <div key={indexErreur}>{erreur}</div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </td>
                     </tr>
