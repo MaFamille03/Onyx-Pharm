@@ -421,12 +421,12 @@ export function ImportVentesSection() {
       for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
         const premiere = lignesBrutes[0];
         const valeurDateVente = premiere["Date de vente"];
+        const erreurs: string[] = [];
         const dateVente = convertirDateImport(valeurDateVente);
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
         }
         const nomClient = String(premiere.Client ?? "").trim();
-        const erreurs: string[] = [];
         const avertissements: string[] = [];
         const suggestionsArticles: string[] = [];
         const lignesResolues: LigneResolue[] = [];
