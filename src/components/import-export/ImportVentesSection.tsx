@@ -757,8 +757,18 @@ export function ImportVentesSection() {
                       {g.nomClient || "Client de passage"}
                     </td>
                     <td className="px-3 py-2 text-onyx-500">{g.dateVente ?? "—"}</td>
-                    <td className="px-3 py-2 text-onyx-500">
-                      {g.lignesResolues.map((l) => l.designation).join(", ") || "—"}
+                    <td className="px-3 py-2 align-top text-onyx-500">
+                      {g.lignesResolues.length > 0 ? (
+                        <div className="space-y-1">
+                          {g.lignesResolues.map((l, i) => (
+                            <div key={`${g.numero}-article-${i}`} className="leading-5">
+                              {l.designation}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-2 align-top">
                       {!g.valide ? (
@@ -766,9 +776,11 @@ export function ImportVentesSection() {
                           <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
                             <AlertCircle size={12} /> Erreur — import bloqué
                           </span>
-                          <div className="max-w-md text-red-600">
+                          <div className="max-w-md space-y-1 text-red-600">
                             {g.erreurs.map((erreur, i) => (
-                              <div key={i}>{erreur}</div>
+                              <div key={i} className="leading-5">
+                                {erreur}
+                              </div>
                             ))}
                           </div>
                         </div>
