@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { logSupabaseError } from "@/lib/errors";
 import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
 import { normaliser, trouverOuCreer } from "@/lib/normaliser";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
@@ -608,13 +607,28 @@ export function ImportVentesSection() {
         .single();
 
       if (venteError || !vente) {
+        // Ne masque pas l'erreur PostgreSQL : pendant un import, l'utilisateur
+        // doit savoir exactement pourquoi la vente n'a pas pu être créée.
+        const detailsErreur = venteError
+          ? [
+              venteError.message,
+              venteError.code ? `Code PostgreSQL : ${venteError.code}` : "",
+              venteError.details ? `Détails : ${venteError.details}` : "",
+              venteError.hint ? `Suggestion : ${venteError.hint}` : "",
+            ].filter(Boolean).join(" — ")
+          : "Supabase n'a retourné aucune vente après l'insertion.";
+
         erreursDetail.push(
-          logSupabaseError(
-            { table: "ventes", operation: "insert (import Excel)" },
-            venteError,
-            `Vente ${groupe.numero} : impossible de la créer.`
-          )
+          `Vente ${groupe.numero} : impossible de la créer. ${detailsErreur}`
         );
+        // eslint-disable-next-line no-console
+        console.error("[ONYX PHARM] Erreur création vente import", {
+          vente: groupe.numero,
+          error: venteError,
+          client: groupe.nomClient,
+          date: groupe.dateVente,
+          montant: groupe.montantTotal,
+        });
         echouees += 1;
         continue;
       }
@@ -703,7 +717,7 @@ export function ImportVentesSection() {
           : "") +
         (echouees > 0 ? `, ${echouees} échec(s) ou ignorée(s)` : "") +
         "." +
-        (erreursDetail.length > 0 ? " Détail : " + erreursDetail.join(" | ") : "")
+        (erreursDetail.length > 0 ? "\n\nDétail des erreurs :\n• " + erreursDetail.join("\n• ") : "")
     );
     setGroupes([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
