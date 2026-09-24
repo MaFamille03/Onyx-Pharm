@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ArrowRight, MapPin, Search } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";

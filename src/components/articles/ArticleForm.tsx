@@ -425,14 +425,14 @@ export function ArticleFormModal({
           ) : (
             <div className="mb-5 rounded-xl border border-onyx-100 bg-onyx-50/60 p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-onyx-800"><Search size={16} /> Rechercher un article existant</div>
-              <p className="mt-1 text-xs text-onyx-500">Commencez à saisir une désignation. Les correspondances sont souples ; choisissez l'article avant de modifier ses informations.</p>
+              <p className="mt-1 text-xs text-onyx-500">Commencez à saisir une désignation. Les correspondances sont souples ; choisissez l&apos;article avant de modifier ses informations.</p>
             </div>
           )}
 
           <section className="rounded-xl border border-onyx-100 bg-white">
             <div className="border-b border-onyx-100 px-4 py-3">
               <h3 className="text-sm font-semibold text-onyx-800">Identification</h3>
-              <p className="mt-0.5 text-xs text-onyx-400">Nom, marque et classification de l'article.</p>
+              <p className="mt-0.5 text-xs text-onyx-400">Nom, marque et classification de l&apos;article.</p>
             </div>
             <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
               <div className="relative lg:col-span-2">
@@ -498,7 +498,7 @@ export function ArticleFormModal({
           <section className="mt-4 rounded-xl border border-onyx-100 bg-white">
             <div className="border-b border-onyx-100 px-4 py-3">
               <h3 className="text-sm font-semibold text-onyx-800">Commercial & suivi</h3>
-              <p className="mt-0.5 text-xs text-onyx-400">Prix, seuil d'alerte, statut et informations de lot.</p>
+              <p className="mt-0.5 text-xs text-onyx-400">Prix, seuil d&apos;alerte, statut et informations de lot.</p>
             </div>
             <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
               <SelectField id="statut" label="Statut" value={form.statut} onChange={(e) => setForm({ ...form, statut: e.target.value })}>
@@ -508,11 +508,11 @@ export function ArticleFormModal({
               <FormField id="stock-minimum" label="Stock minimum (seuil d'alerte)" type="number" min="0" step="1" value={form.stock_minimum} onChange={(e) => setForm({ ...form, stock_minimum: e.target.value })} placeholder="0" />
               <FormField id="numero-lot" label="Numéro de lot" value={form.numero_lot} onChange={(e) => setForm({ ...form, numero_lot: e.target.value })} placeholder="Optionnel — si applicable" />
               <div className="lg:col-span-2 rounded-lg bg-onyx-50/70 p-3 text-xs text-onyx-500">
-                <div className="flex gap-2"><Info size={14} className="mt-0.5 shrink-0" /><span>Le statut indique si l'article reste proposé dans les ventes et achats. Il ne décrit pas son état physique.</span></div>
+                <div className="flex gap-2"><Info size={14} className="mt-0.5 shrink-0" /><span>Le statut indique si l&apos;article reste proposé dans les ventes et achats. Il ne décrit pas son état physique.</span></div>
               </div>
               <div className="lg:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="block text-sm font-medium text-onyx-700">Date d'expiration</label>
+                  <label className="block text-sm font-medium text-onyx-700">Date d&apos;expiration</label>
                   <label className="flex items-center gap-1.5 text-xs text-onyx-500">
                     <input type="checkbox" checked={!expirationApplicable} onChange={(e) => { setExpirationApplicable(!e.target.checked); if (e.target.checked) setForm({ ...form, date_expiration: "" }); }} className="h-4 w-4 rounded border-onyx-300 text-onyx-900 focus:ring-accent-400" />
                     Non applicable
