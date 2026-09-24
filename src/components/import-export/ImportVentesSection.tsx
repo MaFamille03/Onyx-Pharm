@@ -24,6 +24,24 @@ const COLONNES_MODELE = [
 
 type LigneBrute = Record<string, unknown>;
 
+type ArticleImport = {
+  id: string;
+  designation: string;
+  statut: string;
+};
+
+type StockImport = {
+  article_id: string;
+  emplacement_id: string;
+  quantite: number;
+};
+
+type CorrespondanceArticle = {
+  article: ArticleImport;
+  type: "exact" | "approx";
+  score: number;
+};
+
 type LigneResolue = {
   article_id: string;
   designation: string;
@@ -43,6 +61,114 @@ type GroupeVente = {
   doublonProbable: boolean;
   valide: boolean;
 };
+
+
+/**
+ * Distance de Levenshtein utilisée uniquement pour départager les
+ * désignations proches. Elle ne remplace jamais la correspondance exacte.
+ */
+function distanceLevenshtein(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = new Array<number>(b.length + 1);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cout = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cout
+      );
+    }
+    for (let j = 0; j <= b.length; j += 1) prev[j] = curr[j];
+  }
+
+  return prev[b.length];
+}
+
+function normaliserDesignation(texte: string): string {
+  return normaliser(texte)
+    .replace(/([a-z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([a-z])/g, "$1 $2");
+}
+
+function similariteTexte(a: string, b: string): number {
+  const gauche = normaliserDesignation(a);
+  const droite = normaliserDesignation(b);
+  if (!gauche || !droite) return 0;
+  if (gauche === droite) return 1;
+
+  // Une désignation importée peut être une forme courte de celle du stock.
+  // Exemple : "gants nitrile M" vs "gants nitrile non stériles taille M".
+  // On valorise donc les mots significatifs présents dans les deux textes.
+  const motsA = new Set(gauche.split(" ").filter((mot) => mot.length >= 2));
+  const motsB = new Set(droite.split(" ").filter((mot) => mot.length >= 2));
+  const communs = [...motsA].filter((mot) => motsB.has(mot)).length;
+
+  const couvertureImport = motsA.size > 0 ? communs / motsA.size : 0;
+  const couvertureStock = motsB.size > 0 ? communs / motsB.size : 0;
+  const jaccard = motsA.size + motsB.size - communs > 0
+    ? communs / (motsA.size + motsB.size - communs)
+    : 0;
+
+  const longueurMax = Math.max(gauche.length, droite.length);
+  const proximiteEdition = longueurMax
+    ? 1 - distanceLevenshtein(gauche, droite) / longueurMax
+    : 0;
+
+  // La couverture de la désignation importée est volontairement prioritaire :
+  // une forme courte peut être reconnue si tous ses mots sont présents dans
+  // la désignation du stock.
+  return (
+    couvertureImport * 0.70 +
+    jaccard * 0.20 +
+    proximiteEdition * 0.10
+  );
+}
+
+function trouverArticle(
+  designationRecherchee: string,
+  articles: ArticleImport[]
+): CorrespondanceArticle | null {
+  const recherche = normaliserDesignation(designationRecherchee);
+  if (!recherche) return null;
+
+  // 1. Correspondance exacte après normalisation : priorité absolue.
+  const exacts = articles.filter((article) => normaliserDesignation(article.designation) === recherche);
+  if (exacts.length === 1) {
+    return { article: exacts[0], type: "exact", score: 1 };
+  }
+  if (exacts.length > 1) {
+    // Cette situation est anormale (deux articles portant le même nom).
+    return null;
+  }
+
+  // 2. Correspondance approximative uniquement si elle est suffisamment forte.
+  const candidats = articles
+    .map((article) => ({
+      article,
+      score: similariteTexte(designationRecherchee, article.designation),
+    }))
+    .filter((candidat) => candidat.score >= 0.78)
+    .sort((a, b) => b.score - a.score);
+
+  if (candidats.length === 0) return null;
+
+  const meilleur = candidats[0];
+  const second = candidats[1];
+
+  // On refuse une correspondance approximative si deux articles sont trop
+  // proches : mieux vaut demander une désignation plus précise que vendre le
+  // mauvais article.
+  if (second && meilleur.score - second.score < 0.08) return null;
+
+  return {
+    article: meilleur.article,
+    type: "approx",
+    score: meilleur.score,
+  };
+}
 
 export function ImportVentesSection() {
   const supabase = createClient();
@@ -135,6 +261,41 @@ export function ImportVentesSection() {
         return;
       }
 
+      // Charge les articles et les stocks une seule fois. L'ancien code faisait
+      // une requête Supabase par ligne Excel, ce qui rendait l'import lent et
+      // surtout empêchait une vérification cohérente de la quantité disponible.
+      const [articlesResult, stocksResult] = await Promise.all([
+        supabase
+          .from("articles")
+          .select("id, designation, statut")
+          .order("designation"),
+        supabase
+          .from("stocks")
+          .select("article_id, emplacement_id, quantite"),
+      ]);
+
+      if (articlesResult.error) {
+        throw new Error(`Impossible de charger les articles : ${articlesResult.error.message}`);
+      }
+      if (stocksResult.error) {
+        throw new Error(`Impossible de charger les stocks : ${stocksResult.error.message}`);
+      }
+
+      const articles = (articlesResult.data ?? []) as ArticleImport[];
+      const stocks = (stocksResult.data ?? []) as StockImport[];
+
+      if (articles.length === 0) {
+        setErreurGenerale("Aucun article n'est enregistré dans le stock/catalogue.");
+        setAnalyse(false);
+        return;
+      }
+
+      const stockParCle = new Map<string, number>();
+      for (const stock of stocks) {
+        const cle = `${stock.article_id}|${stock.emplacement_id}`;
+        stockParCle.set(cle, (stockParCle.get(cle) ?? 0) + Number(stock.quantite || 0));
+      }
+
       // Regroupe les lignes par numéro de vente.
       const parGroupe = new Map<string, LigneBrute[]>();
       for (const l of brutes) {
@@ -152,6 +313,9 @@ export function ImportVentesSection() {
         return;
       }
 
+      // Quantités déjà réservées par le fichier importé. Cela évite de valider
+      // deux lignes qui consomment ensemble plus que le stock disponible.
+      const quantitesImportees = new Map<string, number>();
       const resultats: GroupeVente[] = [];
 
       for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
@@ -172,26 +336,32 @@ export function ImportVentesSection() {
             continue;
           }
           if (!modeHistorique && !nomEmplacement) {
-            erreurs.push("Emplacement obligatoire pour une vente récente");
+            erreurs.push(`Article "${designation}" : emplacement obligatoire pour une vente récente`);
             continue;
           }
 
-          const { data: article } = await supabase
-            .from("articles")
-            .select("id, designation")
-            .ilike("designation", designation)
-            .limit(1)
-            .maybeSingle();
-          if (!article) {
-            erreurs.push(`Article "${designation}" introuvable`);
+          const correspondance = trouverArticle(designation, articles);
+          if (!correspondance) {
+            erreurs.push(
+              `Article "${designation}" introuvable ou correspondance ambiguë. ` +
+              `Vérifiez la désignation ou utilisez la référence exacte de l'article.`
+            );
             continue;
           }
 
-          // En mode "ventes anciennes", l'emplacement n'a plus aucun
-          // effet réel (rien n'est retiré du stock) — on ne bloque donc
-          // jamais sur lui : s'il est absent ou introuvable, on utilise
-          // un emplacement technique par défaut, juste pour respecter
-          // la structure de la base.
+          const article = correspondance.article;
+
+          // Information utile dans l'interface/logs : on conserve la vraie
+          // désignation enregistrée dans le catalogue, même si le fichier Excel
+          // utilise une variante de nom.
+          if (correspondance.type === "approx") {
+            // Pas une erreur : la correspondance est suffisamment forte et
+            // unique. Elle sera affichée comme une résolution automatique.
+          }
+
+          // En mode historique, l'emplacement n'a pas d'impact sur le stock.
+          // On conserve toutefois un emplacement technique pour respecter la
+          // structure de la table lignes_ventes.
           let emplacementId: string | undefined;
           if (nomEmplacement) {
             const emplacementTrouve = emplacements.find(
@@ -199,13 +369,14 @@ export function ImportVentesSection() {
             );
             emplacementId = emplacementTrouve?.id;
             if (!emplacementId && !modeHistorique) {
-              erreurs.push(`Emplacement "${nomEmplacement}" introuvable`);
+              erreurs.push(`Emplacement "${nomEmplacement}" introuvable pour l'article "${article.designation}"`);
               continue;
             }
           }
+
           if (!emplacementId) {
             if (!modeHistorique) {
-              erreurs.push("Emplacement obligatoire pour une vente récente");
+              erreurs.push(`Article "${article.designation}" : emplacement obligatoire pour une vente récente`);
               continue;
             }
             emplacementId = emplacements[0]?.id;
@@ -213,6 +384,24 @@ export function ImportVentesSection() {
           if (!emplacementId) {
             erreurs.push("Aucun emplacement n'existe dans le système.");
             continue;
+          }
+
+          if (!modeHistorique) {
+            const cleStock = `${article.id}|${emplacementId}`;
+            const disponible = stockParCle.get(cleStock) ?? 0;
+            const dejaDemande = quantitesImportees.get(cleStock) ?? 0;
+            const demandeDansCetteVente = lignesResolues
+              .filter((ligne) => `${ligne.article_id}|${ligne.emplacement_id}` === cleStock)
+              .reduce((total, ligne) => total + ligne.quantite, 0);
+            const disponibleRestant = disponible - dejaDemande - demandeDansCetteVente;
+
+            if (disponibleRestant < quantite) {
+              erreurs.push(
+                `Stock insuffisant pour "${article.designation}" à "${nomEmplacement}" ` +
+                `(disponible : ${Math.max(0, disponibleRestant)}, demandé : ${quantite})`
+              );
+              continue;
+            }
           }
 
           lignesResolues.push({
@@ -224,12 +413,24 @@ export function ImportVentesSection() {
           });
         }
 
+        // On ne réserve les quantités du fichier que si toute la vente est
+        // valide. Ainsi une vente contenant une ligne erronée ne consomme pas
+        // artificiellement le stock disponible pour les ventes suivantes.
+        if (!modeHistorique && erreurs.length === 0) {
+          for (const ligne of lignesResolues) {
+            const cleStock = `${ligne.article_id}|${ligne.emplacement_id}`;
+            quantitesImportees.set(
+              cleStock,
+              (quantitesImportees.get(cleStock) ?? 0) + ligne.quantite
+            );
+          }
+        }
+
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
 
         // Détection de doublon : une vente déjà enregistrée pour le même
         // client, la même date et le même montant total existe-t-elle
-        // déjà ? Ce n'est qu'un signal d'alerte (pas un blocage) — deux
-        // vraies ventes différentes peuvent coïncider par hasard.
+        // déjà ? Ce n'est qu'un signal d'alerte (pas un blocage).
         let doublonProbable = false;
         if (nomClient && dateVente && montantTotal > 0) {
           const clientExistant = clients.find(
@@ -265,7 +466,11 @@ export function ImportVentesSection() {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[ONYX PHARM] Erreur lecture fichier import ventes", err);
-      setErreurGenerale("Impossible de lire ce fichier. Utilisez le modèle .xlsx fourni.");
+      setErreurGenerale(
+        err instanceof Error
+          ? err.message
+          : "Impossible de lire ce fichier. Utilisez le modèle .xlsx fourni."
+      );
     }
     setAnalyse(false);
   }
