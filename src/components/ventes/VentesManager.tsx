@@ -12,7 +12,6 @@ import { InlineBanner, StatutBadge } from "@/components/ui/Badges";
 import { ClientSelect } from "@/components/tiers/ClientSelect";
 import { ConteneurLigneSelect } from "@/components/conteneurs/ConteneurLigneSelect";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
-import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
 import { useExporterTable } from "@/lib/hooks/useExporterTable";
 import { PinModal } from "@/components/securite/PinModal";
 import { DocumentImprimable } from "@/components/documents/DocumentImprimable";
