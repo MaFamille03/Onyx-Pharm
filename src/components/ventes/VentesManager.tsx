@@ -18,6 +18,7 @@ import { PinModal } from "@/components/securite/PinModal";
 import { DocumentImprimable } from "@/components/documents/DocumentImprimable";
 import { ProformaPrintable } from "@/components/documents/ProformaPrintable";
 import { ImportVentesSection } from "@/components/import-export/ImportVentesSection";
+import { VentesSynthese } from "@/components/ventes/VentesSynthese";
 
 type VenteRow = {
   id: string;
@@ -190,6 +191,8 @@ function ListeVentes({
           <ImportVentesSection />
         </div>
       )}
+
+      <VentesSynthese />
 
       <div className="mt-5">
         {loading ? (
