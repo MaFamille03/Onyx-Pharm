@@ -118,10 +118,6 @@ export function VentesSynthese() {
   const totalVentes = ventes.reduce((s, v) => s + v.montant_total, 0);
   const encaissementsPeriode = paiements.reduce((s, p) => s + Number(p.montant), 0);
   const nombreVentes = ventes.length;
-  const clientsActifsPeriode = new Set(
-    classementPeriode.map((client) => client.clientId)
-  ).size;
-  const creancesGlobales = clients.reduce((s, c) => s + Math.max(0, c.total_du), 0);
 
   const classementPeriode = useMemo(() => {
     const map = new Map<string, { nom: string; ventes: number; ca: number; clientId: string }>();
@@ -142,6 +138,11 @@ export function VentesSynthese() {
     }
     return Array.from(map.values()).sort((a, b) => b.ca - a.ca);
   }, [ventes]);
+
+  const clientsActifsPeriode = new Set(
+    classementPeriode.map((client) => client.clientId)
+  ).size;
+  const creancesGlobales = clients.reduce((s, c) => s + Math.max(0, c.total_du), 0);
 
   function appliquerPeriode(type: "mois" | "trimestre" | "annee" | "tout") {
     const now = new Date();
