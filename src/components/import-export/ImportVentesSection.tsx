@@ -41,6 +41,7 @@ type GroupeVente = {
   nomClient: string;
   montantTotal: number;
   erreurs: string[];
+  avertissements: string[];
   doublonProbable: boolean;
   valide: boolean;
 };
@@ -163,6 +164,7 @@ export function ImportVentesSection() {
         const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
+        const avertissements: string[] = [];
         const lignesResolues: LigneResolue[] = [];
 
         for (const l of lignesBrutes) {
