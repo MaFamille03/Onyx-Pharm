@@ -95,45 +95,17 @@ export function VentesManager() {
   return (
     <ListeVentes
       onCreate={() => setVue("creation")}
-      onOpen={(id) => {
-        setVenteOuverteId(id);
-        setVue("detail");
-      }}
     />
   );
 }
 
 function ListeVentes({
   onCreate,
-  onOpen,
 }: {
   onCreate: () => void;
-  onOpen: (id: string) => void;
 }) {
-  const supabase = createClient();
-  const [ventes, setVentes] = useState<VenteRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [outilsOuverts, setOutilsOuverts] = useState(false);
   const { exportingType, exporterTable } = useExporterTable();
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from("ventes")
-      .select(
-        "id, reference, date_vente, montant_total, montant_paye, statut, clients(nom)"
-      )
-      .order("created_at", { ascending: false });
-    if (data) setVentes(data as unknown as VenteRow[]);
-    setLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  useRealtimeRefresh(["ventes"], load);
 
   return (
     <div>
@@ -192,57 +164,14 @@ function ListeVentes({
         </div>
       )}
 
+      {/*
+       * La liste générale des FAC était auparavant affichée ici.
+       * Elle est volontairement supprimée : les commandes sont désormais
+       * accessibles depuis les FAC de la Situation cumulée par client.
+       * Le clic sur une FAC de droite ouvre toujours la vente complète via
+       * le paramètre ?ouvrir=<id>, pris en charge par VentesManager.
+       */}
       <VentesSynthese />
-
-      <div className="mt-5">
-        {loading ? (
-          <p className="py-10 text-center text-sm text-onyx-400">
-            Chargement...
-          </p>
-        ) : ventes.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-onyx-200 bg-white py-14 text-center">
-            <p className="text-sm font-medium text-onyx-600">
-              Aucune vente pour le moment
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            {ventes.map((v) => {
-              const reste = v.montant_total - v.montant_paye;
-              return (
-                <button
-                  key={v.id}
-                  onClick={() => onOpen(v.id)}
-                  className="flex w-full flex-col gap-1 rounded-xl border border-onyx-100 bg-white p-4 text-left hover:bg-onyx-50/50 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div>
-                    <p className="font-medium text-onyx-900">
-                      {v.reference}
-                      {v.clients?.nom ? ` — ${v.clients.nom}` : ""}
-                    </p>
-                    <p className="text-xs text-onyx-400">
-                      {new Date(v.date_vente).toLocaleDateString("fr-FR")}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right text-sm">
-                      <p className="font-semibold text-onyx-800">
-                        {v.montant_total.toLocaleString("fr-FR")} FCFA
-                      </p>
-                      {reste > 0 && v.statut !== "Brouillon" && (
-                        <p className="text-xs text-red-500">
-                          Reste : {reste.toLocaleString("fr-FR")}
-                        </p>
-                      )}
-                    </div>
-                    <StatutBadge statut={v.statut} />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
