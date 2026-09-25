@@ -93,9 +93,7 @@ export function VentesSynthese() {
         .not("statut", "in", "(Annulé,Brouillon)"),
       supabase
         .from("paiements_ventes")
-        .select("montant, date_paiement, vente_id")
-        .gte("date_paiement", debut)
-        .lt("date_paiement", finQuery),
+        .select("montant, date_paiement, vente_id"),
       supabase
         .from("v_synthese_clients_ventes")
         .select("client_id, client_nom, nombre_ventes, total_achats, total_paye, total_du, derniere_vente")
@@ -105,7 +103,22 @@ export function VentesSynthese() {
     if (ventesRes.error) {
       setError(logSupabaseError({ table: "ventes", operation: "select synthèse" }, ventesRes.error, "Impossible de charger le résumé des ventes."));
     } else {
-      setVentes((ventesRes.data ?? []) as VentePeriode[]);
+      const ventesBrutes = (ventesRes.data ?? []) as VentePeriode[];
+      const paiementsBruts = (paiementsRes.data ?? []) as PaiementPeriode[];
+      const paiementsParVente = new Map<string, number>();
+      for (const paiement of paiementsBruts) {
+        paiementsParVente.set(paiement.vente_id, (paiementsParVente.get(paiement.vente_id) ?? 0) + Number(paiement.montant || 0));
+      }
+      setVentes(ventesBrutes.map((vente) => {
+        const total = Number(vente.montant_total || 0);
+        const paye = paiementsParVente.get(vente.id) ?? 0;
+        const reste = Math.max(0, total - paye);
+        return {
+          ...vente,
+          montant_paye: paye,
+          statut: reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée",
+        };
+      }));
     }
 
     if (paiementsRes.error) {
@@ -174,7 +187,9 @@ export function VentesSynthese() {
   }, [venteOuverteId, supabase]);
 
   const totalVentes = ventes.reduce((s, v) => s + v.montant_total, 0);
-  const encaissementsPeriode = paiements.reduce((s, p) => s + Number(p.montant), 0);
+  const encaissementsPeriode = paiements
+    .filter((p) => p.date_paiement >= debut && p.date_paiement <= fin)
+    .reduce((s, p) => s + Number(p.montant || 0), 0);
   const nombreVentes = ventes.length;
 
   const classementPeriode = useMemo(() => {
@@ -315,7 +330,7 @@ export function VentesSynthese() {
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
             <p className="text-xs text-onyx-400">Un client = une ligne déroulante. Les montants sont cumulés sur toutes ses commandes.</p>
           </div>
-          <div className="max-h-[560px] overflow-y-auto">
+          <div className="max-h-[540px] overflow-y-auto">
             {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
               const ouvert = clientOuvertId === c.client_id;
               return (
@@ -350,7 +365,7 @@ export function VentesSynthese() {
             <h3 className="text-sm font-semibold text-onyx-800">FAC du client sélectionné</h3>
             <p className="text-xs text-onyx-400">Chaque FAC est déroulante et reprend les mêmes informations financières.</p>
           </div>
-          <div className="max-h-[560px] overflow-y-auto">
+          <div className="max-h-[540px] overflow-y-auto">
             {!clientOuvertId ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client à gauche.</p> : (() => {
               const facs = ventes.filter((v) => v.client_id === clientOuvertId);
               if (!facs.length) return <p className="p-6 text-sm text-onyx-400">Aucune FAC sur la période sélectionnée.</p>;
@@ -378,7 +393,7 @@ export function VentesSynthese() {
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="text-xs text-onyx-400">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</p>
-                        <p className={`text-sm font-semibold ${reste > 0 ? "text-red-600" : "text-emerald-600"}`}>{reste > 0 ? `Dû ${fcfa(reste)}` : "Payé"}</p>
+                        <p className={`text-sm font-semibold ${reste > 0 ? "text-red-600" : "text-emerald-600"}`}>{reste === 0 ? "Soldée" : paye > 0 ? `Avance · reste ${fcfa(reste)}` : `Non payée · reste ${fcfa(reste)}`}</p>
                       </div>
                     </button>
                     {ouvert && (

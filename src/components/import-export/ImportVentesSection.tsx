@@ -60,7 +60,11 @@ type GroupeVente = {
   dateVente: string | null;
   nomClient: string;
   montantTotal: number;
+  avance: number;
+  reste: number;
+  statutPaiement: "Soldée" | "Avance" | "Non payée";
   erreurs: string[];
+  avertissements: string[];
   doublonProbable: boolean;
   valide: boolean;
 };
@@ -194,6 +198,8 @@ export function ImportVentesSection() {
   const [resultat, setResultat] = useState<string | null>(null);
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
+  const [articlesImportes, setArticlesImportes] = useState<ArticleImport[]>([]);
+  const [stockImportParCle, setStockImportParCle] = useState<Map<string, number>>(new Map());
 
   // Si un fichier a déjà été analysé et qu'on change de mode ensuite,
   // les règles de validation (emplacement obligatoire ou non) changent
@@ -321,6 +327,7 @@ export function ImportVentesSection() {
 
       const articles = (articlesResult.data ?? []) as ArticleImport[];
       const stocks = (stocksResult.data ?? []) as StockImport[];
+      setArticlesImportes(articles);
 
       if (articles.length === 0) {
         setErreurGenerale("Aucun article n'est enregistré dans le stock/catalogue.");
@@ -333,6 +340,7 @@ export function ImportVentesSection() {
         const cle = `${stock.article_id}|${stock.emplacement_id}`;
         stockParCle.set(cle, (stockParCle.get(cle) ?? 0) + Number(stock.quantite || 0));
       }
+      setStockImportParCle(new Map(stockParCle));
 
       // Regroupe les lignes par numéro de vente.
       const parGroupe = new Map<string, LigneBrute[]>();
@@ -362,6 +370,7 @@ export function ImportVentesSection() {
         const dateVente = convertirDateImport(valeurDateVente);
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
+        const avertissements: string[] = [];
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
         }
@@ -397,8 +406,7 @@ export function ImportVentesSection() {
           // désignation enregistrée dans le catalogue, même si le fichier Excel
           // utilise une variante de nom.
           if (correspondance.type === "approx") {
-            // Pas une erreur : la correspondance est suffisamment forte et
-            // unique. Elle sera affichée comme une résolution automatique.
+            avertissements.push(`Article « ${designation} » rapproché automatiquement de « ${article.designation} ».`);
           }
 
           // En mode historique, l'emplacement n'a pas d'impact sur le stock.
@@ -411,7 +419,7 @@ export function ImportVentesSection() {
             );
             emplacementId = emplacementTrouve?.id;
             if (!emplacementId && !modeHistorique) {
-              erreurs.push(`Emplacement "${nomEmplacement}" introuvable pour l'article "${article.designation}"`);
+              erreurs.push(`EMPLACEMENT_CORRECTION|${lignesBrutes.indexOf(l)}|${article.designation}|Emplacement « ${nomEmplacement} » non reconnu.`);
               continue;
             }
           }
@@ -470,6 +478,30 @@ export function ImportVentesSection() {
 
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
 
+        // Paiement : seule la colonne Avance représente l'argent réellement encaissé.
+        // Le reste et le statut sont recalculés par l'application. Les valeurs Excel
+        // de Reste/Statut servent uniquement de contrôle et ne deviennent jamais
+        // la source de vérité.
+        const premiereAvanceBrut = premiere["Avance"];
+        const avance = premiereAvanceBrut === undefined || premiereAvanceBrut === null || String(premiereAvanceBrut).trim() === ""
+          ? 0
+          : Number(premiereAvanceBrut);
+        const reste = Math.max(0, montantTotal - avance);
+        const statutPaiement: "Soldée" | "Avance" | "Non payée" =
+          reste === 0 ? "Soldée" : avance > 0 ? "Avance" : "Non payée";
+        if (!Number.isFinite(avance) || avance < 0 || avance > montantTotal) {
+          erreurs.push(`Avance invalide : « ${String(premiereAvanceBrut)} ». Elle doit être comprise entre 0 et ${montantTotal.toLocaleString("fr-FR")} FCFA.`);
+        }
+        const resteBrutAnalyse = premiere["Reste"];
+        if (resteBrutAnalyse !== undefined && resteBrutAnalyse !== null && String(resteBrutAnalyse).trim() !== "") {
+          const resteExcelAnalyse = Number(resteBrutAnalyse);
+          if (!Number.isFinite(resteExcelAnalyse) || resteExcelAnalyse < 0) {
+            erreurs.push(`Reste invalide : « ${String(resteBrutAnalyse)} ».`);
+          } else if (Math.abs(resteExcelAnalyse - reste) > 0.01) {
+            avertissements.push(`Reste Excel (${resteExcelAnalyse.toLocaleString("fr-FR")} FCFA) différent du reste calculé (${reste.toLocaleString("fr-FR")} FCFA). Le calcul système est conservé.`);
+          }
+        }
+
         // Détection de doublon : une vente déjà enregistrée pour le même
         // client, la même date et le même montant total existe-t-elle
         // déjà ? Ce n'est qu'un signal d'alerte (pas un blocage).
@@ -498,6 +530,9 @@ export function ImportVentesSection() {
           dateVente,
           nomClient,
           montantTotal,
+          avance: Number.isFinite(avance) ? avance : 0,
+          reste,
+          statutPaiement,
           erreurs,
           doublonProbable,
           valide: erreurs.length === 0,
@@ -515,6 +550,61 @@ export function ImportVentesSection() {
       );
     }
     setAnalyse(false);
+  }
+
+  function corrigerEmplacement(numero: string, indexLigne: number, emplacementId: string) {
+    const emplacement = emplacements.find((e) => e.id === emplacementId);
+    if (!emplacement) return;
+
+    setGroupes((precedents) => precedents.map((g) => {
+      if (g.numero !== numero) return g;
+      const lignesBrutes = g.lignesBrutes.map((ligne, index) =>
+        index === indexLigne ? { ...ligne, Emplacement: emplacement.nom } : ligne
+      );
+      const ligneBrute = lignesBrutes[indexLigne];
+      if (!ligneBrute) return g;
+      const designation = String(ligneBrute.Article ?? "").trim();
+      const quantite = Number(ligneBrute["Quantité"]);
+      const prix = Number(ligneBrute["Prix de vente unitaire"]) || 0;
+      const correspondance = trouverArticle(designation, articlesImportes);
+      if (!correspondance || !quantite || quantite <= 0) return g;
+
+      const cleStock = `${correspondance.article.id}|${emplacementId}`;
+      const disponible = stockImportParCle.get(cleStock) ?? 0;
+      const dejaResolue = g.lignesResolues
+        .filter((l) => `${l.article_id}|${l.emplacement_id}` === cleStock)
+        .reduce((s, l) => s + l.quantite, 0);
+      if (!modeHistorique && disponible - dejaResolue < quantite) {
+        return {
+          ...g,
+          lignesBrutes,
+          erreurs: g.erreurs.map((e) => e.includes(`|${indexLigne}|`) ? `Stock insuffisant pour « ${correspondance.article.designation} » à « ${emplacement.nom} » (disponible : ${Math.max(0, disponible - dejaResolue)}, demandé : ${quantite}).` : e),
+        };
+      }
+
+      const anciennesErreurs = g.erreurs.filter((e) => !e.startsWith(`EMPLACEMENT_CORRECTION|${indexLigne}|`));
+      const lignesResolues = [...g.lignesResolues, {
+        article_id: correspondance.article.id,
+        designation: correspondance.article.designation,
+        emplacement_id: emplacementId,
+        quantite,
+        prix,
+      }];
+      const montantTotal = lignesResolues.reduce((sum, l) => sum + l.quantite * l.prix, 0);
+      const avance = Number.isFinite(g.avance) ? g.avance : 0;
+      const reste = Math.max(0, montantTotal - avance);
+      const statutPaiement: "Soldée" | "Avance" | "Non payée" = reste === 0 ? "Soldée" : avance > 0 ? "Avance" : "Non payée";
+      return {
+        ...g,
+        lignesBrutes,
+        lignesResolues,
+        montantTotal,
+        reste,
+        statutPaiement,
+        erreurs: anciennesErreurs,
+        valide: anciennesErreurs.length === 0,
+      };
+    }));
   }
 
   async function confirmerImport() {
@@ -645,20 +735,9 @@ export function ImportVentesSection() {
         }
       }
 
-      const premiere = groupe.lignesBrutes[0];
-      const avanceBrut = premiere["Avance"];
-      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === ""
-        ? 0
-        : Number(avanceBrut);
-      const resteBrut = premiere["Reste"];
-      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === ""
-        ? null
-        : Number(resteBrut);
-      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
-        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
-      } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
-        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
-      }
+      // L'avance a déjà été validée et calculée pendant l'analyse.
+      // Le système crée uniquement le paiement réellement encaissé.
+      const avance = groupe.avance;
       if (avance > 0) {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
@@ -670,6 +749,14 @@ export function ImportVentesSection() {
         if (paiementError) {
           erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
         }
+      }
+
+      const { error: statutPaiementError } = await supabase
+        .from("ventes")
+        .update({ statut: groupe.statutPaiement })
+        .eq("id", vente.id);
+      if (statutPaiementError) {
+        erreursDetail.push(`Vente ${groupe.numero} : statut de paiement non mis à jour : ${statutPaiementError.message}`);
       }
 
       reussies += 1;
@@ -804,6 +891,7 @@ export function ImportVentesSection() {
                   <th className="px-3 py-2">Client</th>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Articles</th>
+                  <th className="px-3 py-2">Paiement</th>
                   <th className="px-3 py-2">Statut</th>
                 </tr>
               </thead>
@@ -829,17 +917,46 @@ export function ImportVentesSection() {
                       )}
                     </td>
                     <td className="px-3 py-2 align-top">
+                      <div className="space-y-0.5 text-xs">
+                        <div className="font-medium text-onyx-700">Total {g.montantTotal.toLocaleString("fr-FR")} FCFA</div>
+                        <div className="text-emerald-600">Avance {g.avance.toLocaleString("fr-FR")} FCFA</div>
+                        <div className={g.reste > 0 ? "text-red-600" : "text-emerald-600"}>Reste {g.reste.toLocaleString("fr-FR")} FCFA</div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 align-top">
                       {!g.valide ? (
                         <div className="space-y-1">
                           <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
                             <AlertCircle size={12} /> Erreur — import bloqué
                           </span>
                           <div className="max-w-md space-y-1 text-red-600">
-                            {g.erreurs.map((erreur, i) => (
-                              <div key={i} className="leading-5">
-                                {erreur}
+                            {g.erreurs.map((erreur, i) => {
+                              if (erreur.startsWith("EMPLACEMENT_CORRECTION|")) {
+                                const [, indexTexte, article, message] = erreur.split("|");
+                                const indexLigne = Number(indexTexte);
+                                return (
+                                  <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                                    <div className="mb-1 font-medium">{message} Article : {article}</div>
+                                    <select
+                                      defaultValue=""
+                                      onChange={(e) => e.target.value && corrigerEmplacement(g.numero, indexLigne, e.target.value)}
+                                      className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-xs text-onyx-800"
+                                    >
+                                      <option value="">Choisir le bon emplacement…</option>
+                                      {emplacements.map((emplacement) => (
+                                        <option key={emplacement.id} value={emplacement.id}>{emplacement.nom}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                );
+                              }
+                              return <div key={i} className="leading-5">{erreur}</div>;
+                            })}
+                            {g.avertissements.length > 0 && (
+                              <div className="mt-2 space-y-1 text-amber-600">
+                                {g.avertissements.map((avertissement, i) => <div key={i} className="leading-5">⚠ {avertissement}</div>)}
                               </div>
-                            ))}
+                            )}
                           </div>
                         </div>
                       ) : g.doublonProbable ? (
