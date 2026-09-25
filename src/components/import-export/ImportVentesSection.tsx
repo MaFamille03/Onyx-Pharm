@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
-import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
+import { exporterExcelMisEnForme } from "@/lib/excel";
 import { normaliser, trouverOuCreer } from "@/lib/normaliser";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
