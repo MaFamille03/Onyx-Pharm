@@ -337,6 +337,8 @@ export function ImportVentesSection() {
     setFichierCourant(file);
     setAnalyse(true);
 
+    const brutes = await lireFichierExcel(file);
+
     try {
         if (brutes.length === 0) {
         setErreurGenerale("Ce fichier ne contient aucune ligne.");
