@@ -242,7 +242,6 @@ export function ImportVentesSection() {
   const [resultat, setResultat] = useState<string | null>(null);
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
-  const [fichierCourant, setFichierCourant] = useState<File | null>(null);
   const [clientOuverts, setClientOuverts] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -334,16 +333,6 @@ export function ImportVentesSection() {
 
   function cleLigne(numero: string, ligneIndex: number) {
     return `${numero}|${ligneIndex}`;
-  }
-
-  function getStockParArticle(articleId: string): StockDisponible[] {
-    return emplacements.map((emplacement) => ({
-      id: emplacement.id,
-      nom: emplacement.nom,
-      quantite: stocks
-        .filter((stock) => stock.article_id === articleId && stock.emplacement_id === emplacement.id)
-        .reduce((total, stock) => total + Number(stock.quantite || 0), 0),
-    }));
   }
 
   async function chargerDonneesReference() {
@@ -572,7 +561,6 @@ export function ImportVentesSection() {
     setResultat(null);
     setGroupes([]);
     setCorrections({});
-    setFichierCourant(file);
     setAnalyse(true);
     try {
       const brutes = await lireFichierExcel(file);
@@ -870,7 +858,7 @@ export function ImportVentesSection() {
           <div className="mt-3 grid gap-3 border-t border-onyx-100 pt-3 lg:grid-cols-2">
             <div>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-onyx-400">
-                <Pencil size={11} /> Modifier / confirmer l'article
+                <Pencil size={11} /> Modifier / confirmer l&apos;article
               </div>
               <input
                 value={corrections[key]?.articleDesignation ?? verification.articleSaisi}
@@ -905,7 +893,7 @@ export function ImportVentesSection() {
                 <MapPin size={11} /> Stock disponible par emplacement
               </div>
               {!verification.article ? (
-                <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d'abord l'article correspondant pour afficher son stock par emplacement.</p>
+                <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d&apos;abord l&apos;article correspondant pour afficher son stock par emplacement.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {verification.stocksParEmplacement.map((stock) => {
@@ -940,7 +928,7 @@ export function ImportVentesSection() {
               )}
               {verification.article && (
                 <p className={`mt-2 text-[10px] ${hasStockAlternatives ? "text-emerald-600" : "text-red-500"}`}>
-                  Stock total de l'article : {stockTotal}. {hasStockAlternatives ? "Un ou plusieurs emplacements permettent cette vente." : "Aucun emplacement ne dispose de la quantité demandée."}
+                  Stock total de l&apos;article : {stockTotal}. {hasStockAlternatives ? "Un ou plusieurs emplacements permettent cette vente." : "Aucun emplacement ne dispose de la quantité demandée."}
                 </p>
               )}
             </div>
@@ -960,7 +948,7 @@ export function ImportVentesSection() {
     <div className="rounded-xl border border-onyx-100 bg-white p-5">
       <h2 className="text-sm font-semibold text-onyx-800">Importer des ventes</h2>
       <p className="mt-1 text-sm text-onyx-500">
-        Importez vos ventes Excel. La vérification reconnaît les désignations proches, contrôle le stock par emplacement et vous laisse corriger chaque ligne avant l'import.
+        Importez vos ventes Excel. La vérification reconnaît les désignations proches, contrôle le stock par emplacement et vous laisse corriger chaque ligne avant l&apos;import.
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
