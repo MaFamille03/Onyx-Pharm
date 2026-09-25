@@ -281,6 +281,7 @@ export function ImportVentesSection() {
           nomClient,
           montantTotal,
           erreurs,
+          avertissements,
           doublonProbable,
           valide: erreurs.length === 0,
         });
