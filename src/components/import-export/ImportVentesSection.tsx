@@ -360,11 +360,11 @@ export function ImportVentesSection() {
         const premiere = lignesBrutes[0];
         const valeurDateVente = premiere["Date de vente"];
         const dateVente = convertirDateImport(valeurDateVente);
+        const nomClient = String(premiere.Client ?? "").trim();
+        const erreurs: string[] = [];
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
         }
-        const nomClient = String(premiere.Client ?? "").trim();
-        const erreurs: string[] = [];
         const lignesResolues: LigneResolue[] = [];
 
         for (const l of lignesBrutes) {
