@@ -53,6 +53,13 @@ type LigneResolue = {
   prix: number;
 };
 
+type ErreurEmplacement = {
+  ligneIndex: number;
+  articleDesignation: string;
+  emplacementSaisi: string;
+  suggestions: { id: string; nom: string }[];
+};
+
 type GroupeVente = {
   numero: string;
   lignesBrutes: LigneBrute[];
@@ -61,6 +68,7 @@ type GroupeVente = {
   nomClient: string;
   montantTotal: number;
   erreurs: string[];
+  erreursEmplacement: ErreurEmplacement[];
   doublonProbable: boolean;
   valide: boolean;
 };
@@ -226,6 +234,8 @@ export function ImportVentesSection() {
   const [resultat, setResultat] = useState<string | null>(null);
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
+  const [fichierCourant, setFichierCourant] = useState<File | null>(null);
+  const [correctionsEmplacements, setCorrectionsEmplacements] = useState<Record<string, string>>({});
 
   // Si un fichier a déjà été analysé et qu'on change de mode ensuite,
   // les règles de validation (emplacement obligatoire ou non) changent
@@ -321,6 +331,10 @@ export function ImportVentesSection() {
     setErreurGenerale(null);
     setResultat(null);
     setGroupes([]);
+    if (file !== fichierCourant) {
+      setCorrectionsEmplacements({});
+    }
+    setFichierCourant(file);
     setAnalyse(true);
 
     try {
@@ -392,6 +406,7 @@ export function ImportVentesSection() {
         const premiere = lignesBrutes[0];
         const valeurDateVente = premiere["Date de vente"];
         const erreurs: string[] = [];
+        const erreursEmplacement: ErreurEmplacement[] = [];
         const dateVente = convertirDateImport(valeurDateVente);
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
@@ -399,9 +414,12 @@ export function ImportVentesSection() {
         const nomClient = String(premiere.Client ?? "").trim();
         const lignesResolues: LigneResolue[] = [];
 
-        for (const l of lignesBrutes) {
+        for (const [ligneIndex, l] of lignesBrutes.entries()) {
           const designation = String(l.Article ?? "").trim();
-          const nomEmplacement = String(l.Emplacement ?? "").trim();
+          const correctionEmplacement = correctionsEmplacements[`${numero}|${ligneIndex}`];
+          const nomEmplacement = correctionEmplacement
+            ? emplacements.find((e) => e.id === correctionEmplacement)?.nom ?? String(l.Emplacement ?? "").trim()
+            : String(l.Emplacement ?? "").trim();
           const quantite = Number(l["Quantité"]);
           const prix = Number(l["Prix de vente unitaire"]) || 0;
 
@@ -442,16 +460,20 @@ export function ImportVentesSection() {
             emplacementId = correspondanceEmplacement?.emplacement.id;
             if (!emplacementId && !modeHistorique) {
               const suggestions = emplacements
-                .map((e) => ({ nom: e.nom, score: similariteTexte(nomEmplacement, e.nom) }))
+                .map((e) => ({ ...e, score: similariteTexte(nomEmplacement, e.nom) }))
                 .filter((e) => e.score >= 0.45)
                 .sort((a, b) => b.score - a.score)
-                .slice(0, 3)
-                .map((e) => `« ${e.nom} »`)
-                .join(", ");
+                .slice(0, 3);
+              erreursEmplacement.push({
+                ligneIndex,
+                articleDesignation: article.designation,
+                emplacementSaisi: nomEmplacement,
+                suggestions: suggestions.map(({ id, nom }) => ({ id, nom })),
+              });
               erreurs.push(
                 `Emplacement « ${nomEmplacement} » non reconnu pour l'article « ${article.designation} ».` +
-                (suggestions ? ` Emplacement(s) proche(s) : ${suggestions}.` : "") +
-                ` Choisissez l'emplacement existant correspondant plutôt que de créer une nouvelle valeur.`
+                (suggestions.length ? ` Emplacement(s) proche(s) : ${suggestions.map((e) => `« ${e.nom} »`).join(", ")}.` : "") +
+                ` Choisissez directement l'emplacement existant dans la liste ci-dessous.`
               );
               continue;
             }
@@ -543,6 +565,7 @@ export function ImportVentesSection() {
           nomClient,
           montantTotal,
           erreurs,
+          erreursEmplacement,
           doublonProbable,
           valide: erreurs.length === 0,
         });
@@ -559,6 +582,37 @@ export function ImportVentesSection() {
       );
     }
     setAnalyse(false);
+  }
+
+  function corrigerEmplacement(numero: string, ligneIndex: number, emplacementId: string) {
+    if (!emplacementId) return;
+    setCorrectionsEmplacements((precedentes) => ({
+      ...precedentes,
+      [`${numero}|${ligneIndex}`]: emplacementId,
+    }));
+  }
+
+  async function reanalyserApresCorrection() {
+    if (!fichierCourant) return;
+    const input = fileInputRef.current;
+    if (!input) return;
+
+    setErreurGenerale(null);
+    setResultat(null);
+    setAnalyse(true);
+
+    // Rejoue exactement la même analyse sur le même fichier.
+    // Les seules valeurs remplacées sont les emplacements explicitement
+    // sélectionnés par l'utilisateur dans les erreurs.
+    const file = fichierCourant;
+    const brutes = await lireFichierExcel(file);
+
+    // La logique complète d'analyse reste dans handleFichier ; ce second
+    // passage est déclenché par la sélection via un événement synthétique.
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    input.files = dataTransfer.files;
+    await handleFichier({ target: input } as unknown as React.ChangeEvent<HTMLInputElement>);
   }
 
   async function confirmerImport() {
@@ -882,6 +936,42 @@ if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
                             {g.erreurs.map((erreur, i) => (
                               <div key={i} className="leading-5">
                                 {erreur}
+                              </div>
+                            ))}
+                            {g.erreursEmplacement.map((erreurEmplacement) => (
+                              <div
+                                key={`${g.numero}-emplacement-${erreurEmplacement.ligneIndex}`}
+                                className="mt-2 rounded-md border border-red-200 bg-white p-2"
+                              >
+                                <div className="mb-1 text-xs font-medium text-onyx-700">
+                                  Article : {erreurEmplacement.articleDesignation}
+                                </div>
+                                <select
+                                  className="w-full rounded-md border border-onyx-200 bg-white px-2 py-1.5 text-xs text-onyx-700"
+                                  value={correctionsEmplacements[`${g.numero}|${erreurEmplacement.ligneIndex}`] ?? ""}
+                                  onChange={(e) =>
+                                    corrigerEmplacement(
+                                      g.numero,
+                                      erreurEmplacement.ligneIndex,
+                                      e.target.value
+                                    )
+                                  }
+                                >
+                                  <option value="">Choisir l'emplacement existant…</option>
+                                  {erreurEmplacement.suggestions.map((emplacement) => (
+                                    <option key={emplacement.id} value={emplacement.id}>
+                                      {emplacement.nom}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  className="mt-2 rounded-md bg-onyx-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                                  disabled={!correctionsEmplacements[`${g.numero}|${erreurEmplacement.ligneIndex}`] || analyse}
+                                  onClick={() => void reanalyserApresCorrection()}
+                                >
+                                  Appliquer l'emplacement et revérifier
+                                </button>
                               </div>
                             ))}
                           </div>
