@@ -391,12 +391,12 @@ export function ImportVentesSection() {
       for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
         const premiere = lignesBrutes[0];
         const valeurDateVente = premiere["Date de vente"];
+        const erreurs: string[] = [];
         const dateVente = convertirDateImport(valeurDateVente);
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
         }
         const nomClient = String(premiere.Client ?? "").trim();
-        const erreurs: string[] = [];
         const lignesResolues: LigneResolue[] = [];
 
         for (const l of lignesBrutes) {
@@ -698,6 +698,7 @@ export function ImportVentesSection() {
       const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === ""
         ? null
         : Number(resteBrut);
+      const resteCalcule = Math.max(0, groupe.montantTotal - avance);
       if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
         erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
       } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
