@@ -654,7 +654,6 @@ export function ImportVentesSection() {
       const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === ""
         ? null
         : Number(resteBrut);
-      const resteCalcule = Math.max(0, groupe.montantTotal - avance);
       if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
         erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
       } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
