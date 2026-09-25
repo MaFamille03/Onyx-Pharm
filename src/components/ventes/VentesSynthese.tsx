@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BarChart3, CalendarDays, Download, RefreshCw, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
-import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
+import { SecondaryButton } from "@/components/ui/Buttons";
 import { exporterExcelMisEnForme } from "@/lib/excel";
 
 const fcfa = (value: number) => `${value.toLocaleString("fr-FR")} FCFA`;
@@ -46,7 +46,7 @@ function finAujourdhui() {
 }
 
 export function VentesSynthese() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [debut, setDebut] = useState(debutMoisCourant());
   const [fin, setFin] = useState(finAujourdhui());
   const [ventes, setVentes] = useState<VentePeriode[]>([]);
@@ -106,7 +106,7 @@ export function VentesSynthese() {
     }
 
     setLoading(false);
-  }, [debut, fin]);
+  }, [debut, fin, supabase]);
 
   useEffect(() => {
     load();
