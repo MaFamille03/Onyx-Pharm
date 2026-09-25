@@ -27,7 +27,7 @@ type VentePeriode = {
   montant_total: number;
   montant_paye: number;
   statut: string;
-  clients: { nom: string } | null;
+  clients: { nom: string }[] | null;
 };
 
 type PaiementPeriode = {
@@ -124,7 +124,7 @@ export function VentesSynthese() {
     for (const v of ventes) {
       const key = v.client_id ?? "__passage__";
       const actuel = map.get(key) ?? {
-        nom: v.clients?.nom ?? "Client de passage",
+        nom: v.clients?.[0]?.nom ?? "Client de passage",
         ventes: 0,
         ca: 0,
         clientId: v.client_id,
