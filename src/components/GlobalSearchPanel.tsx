@@ -53,31 +53,76 @@ export function GlobalSearchPanel({ terme }: { terme: string }) {
     let annule = false;
     setLoading(true);
     const supabase = createClient();
+
+    // Même logique de recherche souple que Stock > Articles & Stock :
+    // on récupère des candidats puis on les classe avec classerCorrespondances.
+    // La donnée enregistrée n'est jamais modifiée.
     const mots = requete
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\\u0300-\\u036f]/g, "")
       .toLowerCase()
-      .split(/\s+/)
+      .split(/\\s+/)
       .filter((m) => m.length >= 2)
       .sort((a, b) => b.length - a.length);
-    const motCleArticle = mots[0] ?? requete;
-    const motif = `%${requete}%`;
+
+    const motCle = mots[0] ?? requete;
+    const fragment = motCle.slice(0, Math.max(3, Math.min(5, motCle.length)));
+    const motif = `%${fragment}%`;
 
     Promise.all([
-      supabase.from("articles").select("id, designation").ilike("designation", `%${motCleArticle.slice(0, Math.max(3, Math.min(5, motCleArticle.length)))}%`).limit(40),
-      supabase.from("clients").select("id, nom").ilike("nom", motif).limit(6),
-      supabase.from("fournisseurs").select("id, nom").ilike("nom", motif).limit(6),
+      supabase
+        .from("articles")
+        .select("id, designation")
+        .ilike("designation", motif)
+        .limit(60),
+      supabase
+        .from("clients")
+        .select("id, nom")
+        .ilike("nom", motif)
+        .limit(60),
+      supabase
+        .from("fournisseurs")
+        .select("id, nom")
+        .ilike("nom", motif)
+        .limit(60),
       supabase
         .from("ventes")
         .select("id, reference, clients(nom)")
         .ilike("reference", motif)
-        .limit(6),
+        .limit(60),
     ]).then(([articlesRes, clientsRes, fournisseursRes, ventesRes]) => {
       if (annule) return;
+
       const articlesClasses = classerCorrespondances(
         requete,
         articlesRes.data ?? [],
         (a) => a.designation,
+        0.35
+      ).slice(0, 8);
+
+      const clientsClasses = classerCorrespondances(
+        requete,
+        clientsRes.data ?? [],
+        (c) => c.nom,
+        0.35
+      ).slice(0, 8);
+
+      const fournisseursClasses = classerCorrespondances(
+        requete,
+        fournisseursRes.data ?? [],
+        (f) => f.nom,
+        0.35
+      ).slice(0, 8);
+
+      const ventesCandidates = (ventesRes.data ?? []).map((v) => ({
+        ...v,
+        _texteRecherche: `${v.reference} ${(v.clients as unknown as { nom: string } | null)?.nom ?? ""}`,
+      }));
+
+      const ventesClasses = classerCorrespondances(
+        requete,
+        ventesCandidates,
+        (v) => v._texteRecherche,
         0.35
       ).slice(0, 8);
 
@@ -87,17 +132,17 @@ export function GlobalSearchPanel({ terme }: { terme: string }) {
           id: a.id,
           label: a.designation,
         })),
-        ...(clientsRes.data ?? []).map((c) => ({
+        ...clientsClasses.map((c) => ({
           type: "client" as const,
           id: c.id,
           label: c.nom,
         })),
-        ...(fournisseursRes.data ?? []).map((f) => ({
+        ...fournisseursClasses.map((f) => ({
           type: "fournisseur" as const,
           id: f.id,
           label: f.nom,
         })),
-        ...(ventesRes.data ?? []).map(
+        ...ventesClasses.map(
           (v) =>
             ({
               type: "vente" as const,
@@ -107,6 +152,7 @@ export function GlobalSearchPanel({ terme }: { terme: string }) {
             }) as Resultat
         ),
       ];
+
       setResultats(tous);
       setLoading(false);
     });
