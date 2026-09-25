@@ -62,7 +62,7 @@ type GroupeVente = {
   montantTotal: number;
   avance: number;
   reste: number;
-  statutPaiement: "Soldée" | "Avance" | "Non payée";
+  modePaiement: string;
   erreurs: string[];
   doublonProbable: boolean;
   valide: boolean;
@@ -214,6 +214,32 @@ function trouverEmplacementSouple(nomRecherche: string, emplacements: Array<{ id
 }
 
 
+
+function lireMontant(cellule: unknown): number | null {
+  if (cellule === null || cellule === undefined || String(cellule).trim() === "") return null;
+  const brut = String(cellule).replace(/\s/g, "").replace(",", ".");
+  const valeur = Number(brut);
+  return Number.isFinite(valeur) ? valeur : null;
+}
+
+function extraireAvanceEtMode(lignes: LigneBrute[]) {
+  const montants = lignes
+    .map((ligne) => lireMontant(ligne["Avance"] ?? ligne["Montant payé"]))
+    .filter((valeur): valeur is number => valeur !== null);
+
+  const valeursUniques = Array.from(new Set(montants.map((v) => Math.round(v * 100) / 100)));
+  const avance = valeursUniques[0] ?? 0;
+  const modePaiement = String(
+    lignes.find((ligne) => String(ligne["Mode de paiement"] ?? "").trim())?.["Mode de paiement"] ?? ""
+  ).trim();
+
+  return {
+    avance,
+    modePaiement,
+    montantContradictoire: valeursUniques.length > 1,
+  };
+}
+
 export function ImportVentesSection() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
@@ -251,14 +277,6 @@ export function ImportVentesSection() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeHistorique]);
-
-  function convertirMontantImport(valeur: unknown): number {
-    if (valeur === undefined || valeur === null || String(valeur).trim() === "") return 0;
-    if (typeof valeur === "number") return Number.isFinite(valeur) ? valeur : 0;
-    const texte = String(valeur).trim().replace(/\s/g, "").replace(/FCFA/gi, "").replace(/,/g, ".");
-    const nombre = Number(texte);
-    return Number.isFinite(nombre) ? nombre : 0;
-  }
 
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
@@ -386,25 +404,7 @@ export function ImportVentesSection() {
         const avertissements: string[] = [];
         const suggestionsArticles: string[] = [];
         const lignesResolues: LigneResolue[] = [];
-
-        if (!nomClient) {
-          erreurs.push(`Client non renseigné pour la vente « ${numero} ». Saisissez le nom du client dans la colonne Client. Aucun client ne sera créé automatiquement sans nom.`);
-        }
-
-        // L'avance est un paiement, pas un prix de vente. Elle est lue une seule
-        // fois par vente (sur la première cellule renseignée) et le reste est
-        // toujours recalculé par le système.
-        const avancesRenseignees = lignesBrutes
-          .map((ligne) => convertirMontantImport(ligne.Avance ?? ligne["Montant payé"]))
-          .filter((montant) => montant > 0);
-        const avance = avancesRenseignees[0] ?? 0;
-        const restesExcel = lignesBrutes
-          .map((ligne) => convertirMontantImport(ligne["Reste (contrôle)"] ?? ligne.Reste))
-          .filter((montant) => montant >= 0);
-        const resteExcel = restesExcel.length > 0 ? restesExcel[0] : null;
-        if (avancesRenseignees.some((montant) => Math.abs(montant - avance) > 0.01)) {
-          avertissements.push("Plusieurs avances différentes ont été renseignées pour cette même vente. La première avance renseignée sera utilisée.");
-        }
+        const paiementImport = extraireAvanceEtMode(lignesBrutes);
 
         for (const l of lignesBrutes) {
           const designation = String(l.Article ?? "").trim();
@@ -463,7 +463,7 @@ export function ImportVentesSection() {
               emplacementId = emplacementParDefaut?.id;
               if (emplacementId) {
                 problemeEmplacement = `Emplacement « ${nomEmplacement} » non reconnu. Sélectionnez le bon emplacement.`;
-                erreurs.push(problemeEmplacement);
+                avertissements.push(problemeEmplacement);
               }
             }
           }
@@ -473,7 +473,7 @@ export function ImportVentesSection() {
             emplacementId = emplacementParDefaut?.id;
             if (!modeHistorique && emplacementId) {
               problemeEmplacement = `Aucun emplacement indiqué pour « ${article.designation} ». Sélectionnez l'emplacement avant l'import.`;
-              erreurs.push(problemeEmplacement);
+              avertissements.push(problemeEmplacement);
             }
           }
           if (!emplacementId) {
@@ -491,8 +491,8 @@ export function ImportVentesSection() {
             const disponibleRestant = disponible - dejaDemande - demandeDansCetteVente;
 
             if (disponibleRestant < quantite) {
-              erreurs.push(
-                `Stock insuffisant pour « ${article.designation} » à cet emplacement : disponible ${Math.max(0, disponibleRestant)}, demandé ${quantite}. Choisissez un autre emplacement.`
+              avertissements.push(
+                `Stock insuffisant pour « ${article.designation} » à cet emplacement.`
               );
               lignesResolues.push({
                 article_id: article.id,
@@ -534,19 +534,31 @@ export function ImportVentesSection() {
         }
 
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
-        const resteCalcule = Math.max(0, montantTotal - avance);
+        const avance = Math.max(0, paiementImport.avance);
+        const reste = Math.max(0, montantTotal - avance);
+
+        if (paiementImport.avance < 0) {
+          erreurs.push("Avance invalide : le montant payé ne peut pas être négatif.");
+        }
         if (avance > montantTotal + 0.01) {
-          erreurs.push(`Avance invalide : ${avance.toLocaleString("fr-FR")} FCFA est supérieure au total calculé de ${montantTotal.toLocaleString("fr-FR")} FCFA.`);
+          erreurs.push(
+            `Avance (${avance.toLocaleString("fr-FR")} FCFA) supérieure au total de la vente (${montantTotal.toLocaleString("fr-FR")} FCFA).`
+          );
         }
-        if (resteExcel !== null && Math.abs(resteExcel - resteCalcule) > 0.01) {
-          avertissements.push(`Reste Excel (${resteExcel.toLocaleString("fr-FR")} FCFA) différent du reste calculé (${resteCalcule.toLocaleString("fr-FR")} FCFA). Le calcul système sera conservé.`);
+        if (paiementImport.montantContradictoire) {
+          avertissements.push(
+            "Plusieurs montants d'avance différents ont été trouvés dans les lignes de cette vente. Le premier montant renseigné est utilisé."
+          );
         }
-        const statutPaiement: GroupeVente["statutPaiement"] =
-          resteCalcule <= 0.01 && montantTotal > 0
-            ? "Soldée"
-            : avance > 0
-              ? "Avance"
-              : "Non payée";
+
+        const resteExcel = lireMontant(
+          premiere["Reste (contrôle)"] ?? premiere["Reste"]
+        );
+        if (resteExcel !== null && Math.abs(resteExcel - reste) > 0.01) {
+          avertissements.push(
+            `Reste Excel (${resteExcel.toLocaleString("fr-FR")} FCFA) différent du reste calculé (${reste.toLocaleString("fr-FR")} FCFA). Le calcul système sera conservé.`
+          );
+        }
 
         // Détection de doublon : une vente déjà enregistrée pour le même
         // client, la même date et le même montant total existe-t-elle
@@ -577,8 +589,8 @@ export function ImportVentesSection() {
           nomClient,
           montantTotal,
           avance,
-          reste: resteCalcule,
-          statutPaiement,
+          reste,
+          modePaiement: paiementImport.modePaiement,
           erreurs,
           doublonProbable,
           avertissements,
@@ -728,25 +740,25 @@ export function ImportVentesSection() {
         }
       }
 
+      // L'avance représente uniquement le paiement réellement encaissé.
+      // Le total et le reste sont calculés par le système :
+      // Total = Σ(Qté × PU), Reste = Total - Avance.
       if (groupe.avance > 0) {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
           montant: groupe.avance,
-          mode_paiement: String(groupe.lignesBrutes[0]?.["Mode de paiement"] ?? "").trim() || "Espèces",
+          mode_paiement: groupe.modePaiement || "Espèces",
           date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
+
         if (paiementError) {
-          erreursDetail.push(`Vente ${groupe.numero} : paiement de ${groupe.avance.toLocaleString("fr-FR")} FCFA non enregistré.`);
-          echouees += 1;
-          continue;
+          erreursDetail.push(
+            `Vente ${groupe.numero} créée, mais le paiement de ${groupe.avance.toLocaleString("fr-FR")} FCFA n'a pas pu être enregistré : ${paiementError.message}`
+          );
         }
       }
 
-      // Le statut métier de la vente reste celui géré par la validation
-      // (ex. « Validé »). Le statut de paiement (Soldée / Avance / Non payée)
-      // est calculé à partir de paiements_ventes dans la synthèse. On ne mélange
-      // donc jamais statut de vente et statut d'encaissement.
       reussies += 1;
     }
 
@@ -814,27 +826,18 @@ export function ImportVentesSection() {
         );
 
         const avertissements = g.avertissements.filter((a) =>
-          !a.includes(`Emplacement «`) &&
+          !a.includes('Sélectionnez le bon emplacement') &&
+          !a.includes('Rapproché de') &&
+          !a.includes('non reconnu') &&
+          !a.includes('Aucun emplacement indiqué') &&
           !a.includes(`Stock insuffisant pour « ${ligneCourante.designation} »`)
         );
 
-        const erreurs = g.erreurs.filter((e) =>
-          !e.includes(`Emplacement «`) &&
-          !e.includes(`Aucun emplacement indiqué pour « ${ligneCourante.designation} »`) &&
-          !e.includes(`Stock insuffisant pour « ${ligneCourante.designation} »`)
-        );
-
         if (problemeQuantite) {
-          erreurs.push(`Stock insuffisant pour « ${ligneCourante.designation} » à cet emplacement : disponible ${problemeQuantite.disponible}, demandé ${problemeQuantite.demande}. Choisissez un autre emplacement.`);
+          avertissements.push(`Stock insuffisant pour « ${ligneCourante.designation} » à cet emplacement.`);
         }
 
-        return {
-          ...g,
-          lignesResolues: lignes,
-          erreurs,
-          avertissements,
-          valide: erreurs.length === 0,
-        };
+        return { ...g, lignesResolues: lignes, avertissements };
       })
     );
   }
@@ -952,9 +955,8 @@ export function ImportVentesSection() {
                   <th className="px-3 py-2">N°</th>
                   <th className="px-3 py-2">Client</th>
                   <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Total</th>
-                  <th className="px-3 py-2">Paiement</th>
                   <th className="px-3 py-2">Articles</th>
+                  <th className="px-3 py-2">Total / Avance / Reste</th>
                   <th className="px-3 py-2">Statut</th>
                 </tr>
               </thead>
@@ -963,16 +965,9 @@ export function ImportVentesSection() {
                   <tr key={g.numero} className="border-t border-onyx-50">
                     <td className="px-3 py-2 text-onyx-400">{g.numero}</td>
                     <td className="px-3 py-2 text-onyx-700">
-                      {g.nomClient || "Client non renseigné"}
+                      {g.nomClient || "—"}
                     </td>
                     <td className="px-3 py-2 text-onyx-500">{g.dateVente ?? "—"}</td>
-                    <td className="px-3 py-2 text-right align-top font-medium text-onyx-700">
-                      {g.montantTotal.toLocaleString("fr-FR")} FCFA
-                    </td>
-                    <td className="px-3 py-2 align-top text-onyx-500">
-                      <div>{g.avance.toLocaleString("fr-FR")} FCFA avancés</div>
-                      <div className="font-medium text-onyx-700">Reste : {g.reste.toLocaleString("fr-FR")} FCFA</div>
-                    </td>
                     <td className="px-3 py-2 align-top text-onyx-500">
                       {g.lignesResolues.length > 0 ? (
                         <div className="space-y-1.5">
@@ -994,27 +989,31 @@ export function ImportVentesSection() {
                         "—"
                       )}
                     </td>
+                    <td className="px-3 py-2 align-top text-onyx-600">
+                      <div className="space-y-0.5 whitespace-nowrap">
+                        <div>Total : <strong>{g.montantTotal.toLocaleString("fr-FR")} FCFA</strong></div>
+                        <div>Avance : {g.avance.toLocaleString("fr-FR")} FCFA</div>
+                        <div>Reste : <strong>{g.reste.toLocaleString("fr-FR")} FCFA</strong></div>
+                      </div>
+                    </td>
                     <td className="px-3 py-2 align-top">
                       <div className="space-y-2">
                         {g.valide ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
-                            <CheckCircle2 size={12} /> Prête à importer
-                          </span>
+                          <div className="space-y-1">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                              <CheckCircle2 size={12} /> Prête à importer
+                            </span>
+                            <div className={`text-[11px] font-medium ${
+                              g.reste === 0 ? "text-emerald-700" : g.avance > 0 ? "text-amber-700" : "text-onyx-500"
+                            }`}>
+                              {g.reste === 0 ? "Paiement : Soldée" : g.avance > 0 ? "Paiement : Avance" : "Paiement : Non payée"}
+                            </div>
+                          </div>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
                             <AlertCircle size={12} /> Erreur — import bloqué
                           </span>
                         )}
-
-                        <div className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${
-                          g.statutPaiement === "Soldée"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : g.statutPaiement === "Avance"
-                              ? "bg-amber-50 text-amber-700"
-                              : "bg-onyx-100 text-onyx-600"
-                        }`}>
-                          Paiement : {g.statutPaiement}
-                        </div>
 
                         {g.doublonProbable && (
                           <div className="rounded-md bg-amber-50 px-2.5 py-2 text-amber-700">
