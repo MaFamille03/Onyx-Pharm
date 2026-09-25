@@ -101,7 +101,11 @@ export function VentesSynthese() {
     if (clientsRes.error) {
       setError((prev) => prev ?? logSupabaseError({ table: "v_synthese_clients_ventes", operation: "select" }, clientsRes.error, "Impossible de charger la situation des clients."));
     } else {
-      setClients((clientsRes.data ?? []) as ClientSynthese[]);
+      setClients(
+        ((clientsRes.data ?? []) as ClientSynthese[]).filter(
+          (client) => typeof client.client_nom === "string" && client.client_nom.trim().length > 0
+        )
+      );
     }
 
     setLoading(false);
@@ -114,7 +118,9 @@ export function VentesSynthese() {
   const totalVentes = ventes.reduce((s, v) => s + v.montant_total, 0);
   const encaissementsPeriode = paiements.reduce((s, p) => s + Number(p.montant), 0);
   const nombreVentes = ventes.length;
-  const clientsActifsPeriode = new Set(ventes.map((v) => v.client_id).filter(Boolean)).size;
+  const clientsActifsPeriode = new Set(
+    classementPeriode.map((client) => client.clientId)
+  ).size;
   const creancesGlobales = clients.reduce((s, c) => s + Math.max(0, c.total_du), 0);
 
   const classementPeriode = useMemo(() => {
@@ -122,8 +128,10 @@ export function VentesSynthese() {
     for (const v of ventes) {
       if (!v.client_id) continue;
       const key = v.client_id;
+      const nomClient = v.clients?.[0]?.nom?.trim();
+      if (!nomClient) continue;
       const actuel = map.get(key) ?? {
-        nom: v.clients?.[0]?.nom ?? "Client sans nom",
+        nom: nomClient,
         ventes: 0,
         ca: 0,
         clientId: v.client_id,
