@@ -379,8 +379,8 @@ function NouvelleVente({
       }
     } else {
       const { data: refData, error: refError } = await supabase.rpc(
-        "generer_numero_document",
-        { p_prefixe: "FAC" }
+        "generer_numero_facture",
+        { p_date: dateVente }
       );
       if (refError || !refData) {
         setError(

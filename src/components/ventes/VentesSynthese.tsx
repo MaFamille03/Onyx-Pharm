@@ -315,7 +315,7 @@ export function VentesSynthese() {
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
             <p className="text-xs text-onyx-400">Un client = une ligne déroulante. Les montants sont cumulés sur toutes ses commandes.</p>
           </div>
-          <div className="max-h-[460px] overflow-y-auto">
+          <div className="max-h-[560px] overflow-y-auto">
             {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
               const ouvert = clientOuvertId === c.client_id;
               return (
@@ -350,7 +350,7 @@ export function VentesSynthese() {
             <h3 className="text-sm font-semibold text-onyx-800">FAC du client sélectionné</h3>
             <p className="text-xs text-onyx-400">Chaque FAC est déroulante et reprend les mêmes informations financières.</p>
           </div>
-          <div className="max-h-[460px] overflow-y-auto">
+          <div className="max-h-[560px] overflow-y-auto">
             {!clientOuvertId ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client à gauche.</p> : (() => {
               const facs = ventes.filter((v) => v.client_id === clientOuvertId);
               if (!facs.length) return <p className="p-6 text-sm text-onyx-400">Aucune FAC sur la période sélectionnée.</p>;
