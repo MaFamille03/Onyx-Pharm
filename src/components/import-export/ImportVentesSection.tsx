@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
@@ -18,11 +18,9 @@ const COLONNES_MODELE = [
   "Emplacement",
   "Quantité",
   "Prix de vente unitaire",
-  "Avance",
-  "Reste",
-  "Statut",
   "Mode de paiement",
-  "Observation",
+  "Avance",
+  "Reste (contrôle)",
 ];
 
 type LigneBrute = Record<string, unknown>;
@@ -51,6 +49,8 @@ type LigneResolue = {
   emplacement_id: string;
   quantite: number;
   prix: number;
+  problemeQuantite?: { disponible: number; demande: number };
+  problemeEmplacement?: string;
 };
 
 type GroupeVente = {
@@ -64,9 +64,10 @@ type GroupeVente = {
   reste: number;
   statutPaiement: "Soldée" | "Avance" | "Non payée";
   erreurs: string[];
-  avertissements: string[];
   doublonProbable: boolean;
   valide: boolean;
+  avertissements: string[];
+  suggestionsArticles: string[];
 };
 
 
@@ -156,7 +157,7 @@ function trouverArticle(
       article,
       score: similariteTexte(designationRecherchee, article.designation),
     }))
-    .filter((candidat) => candidat.score >= 0.78)
+    .filter((candidat) => candidat.score >= 0.58)
     .sort((a, b) => b.score - a.score);
 
   if (candidats.length === 0) return null;
@@ -167,7 +168,7 @@ function trouverArticle(
   // On refuse une correspondance approximative si deux articles sont trop
   // proches : mieux vaut demander une désignation plus précise que vendre le
   // mauvais article.
-  if (second && meilleur.score - second.score < 0.08) return null;
+  if (second && meilleur.score - second.score < 0.05) return null;
 
   return {
     article: meilleur.article,
@@ -176,11 +177,49 @@ function trouverArticle(
   };
 }
 
+function trouverSuggestionsArticles(
+  designationRecherchee: string,
+  articles: ArticleImport[],
+  limite = 3
+): Array<{ article: ArticleImport; score: number }> {
+  const recherche = normaliserDesignation(designationRecherchee);
+  if (!recherche) return [];
+
+  return articles
+    .map((article) => ({
+      article,
+      score: similariteTexte(designationRecherchee, article.designation),
+    }))
+    .filter((candidat) => candidat.score >= 0.25)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limite);
+}
+
+function trouverEmplacementSouple(nomRecherche: string, emplacements: Array<{ id: string; nom: string }>) {
+  const recherche = normaliserDesignation(nomRecherche);
+  if (!recherche) return null;
+
+  const exact = emplacements.find((e) => normaliserDesignation(e.nom) === recherche);
+  if (exact) return { emplacement: exact, score: 1, exact: true };
+
+  const candidats = emplacements
+    .map((e) => ({ emplacement: e, score: similariteTexte(nomRecherche, e.nom) }))
+    .sort((a, b) => b.score - a.score);
+
+  const meilleur = candidats[0];
+  const second = candidats[1];
+  if (!meilleur || meilleur.score < 0.45) return null;
+  if (second && meilleur.score - second.score < 0.05) return null;
+  return { emplacement: meilleur.emplacement, score: meilleur.score, exact: false };
+}
+
+
 export function ImportVentesSection() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [clients, setClients] = useState<{ id: string; nom: string }[]>([]);
+  const [stockParCleImport, setStockParCleImport] = useState<Record<string, number>>({});
 
   useEffect(() => {
     supabase
@@ -198,8 +237,6 @@ export function ImportVentesSection() {
   const [resultat, setResultat] = useState<string | null>(null);
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
-  const [articlesImportes, setArticlesImportes] = useState<ArticleImport[]>([]);
-  const [stockImportParCle, setStockImportParCle] = useState<Map<string, number>>(new Map());
 
   // Si un fichier a déjà été analysé et qu'on change de mode ensuite,
   // les règles de validation (emplacement obligatoire ou non) changent
@@ -215,31 +252,12 @@ export function ImportVentesSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeHistorique]);
 
-  function convertirDateImport(valeur: unknown): string | null {
-    if (valeur === undefined || valeur === null || String(valeur).trim() === "") return null;
-    if (valeur instanceof Date && !Number.isNaN(valeur.getTime())) {
-      return valeur.toISOString().slice(0, 10);
-    }
-    const texte = String(valeur).trim();
-    if (/^\d+(\.\d+)?$/.test(texte)) {
-      const serial = Number(texte);
-      if (serial > 20000 && serial < 100000) {
-        const date = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
-        return date.toISOString().slice(0, 10);
-      }
-    }
-    const iso = texte.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (iso) {
-      const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00Z`);
-      return Number.isNaN(d.getTime()) ? null : texte;
-    }
-    const fr = texte.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (fr) {
-      const [, jour, mois, annee] = fr;
-      const d = new Date(Date.UTC(Number(annee), Number(mois) - 1, Number(jour)));
-      return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-    }
-    return null;
+  function convertirMontantImport(valeur: unknown): number {
+    if (valeur === undefined || valeur === null || String(valeur).trim() === "") return 0;
+    if (typeof valeur === "number") return Number.isFinite(valeur) ? valeur : 0;
+    const texte = String(valeur).trim().replace(/\s/g, "").replace(/FCFA/gi, "").replace(/,/g, ".");
+    const nombre = Number(texte);
+    return Number.isFinite(nombre) ? nombre : 0;
   }
 
   function telechargerModele() {
@@ -252,11 +270,9 @@ export function ImportVentesSection() {
         Emplacement: emplacements[0]?.nom ?? "Entrepôt",
         Quantité: 10,
         "Prix de vente unitaire": 500,
-        Avance: 3000,
-        Reste: 2000,
-        Statut: "Avance",
         "Mode de paiement": "Espèces",
-        Observation: "",
+        Avance: 5000,
+        "Reste (contrôle)": 0,
       },
       {
         "N° de vente (regroupement)": "V1",
@@ -266,11 +282,9 @@ export function ImportVentesSection() {
         Emplacement: emplacements[0]?.nom ?? "Entrepôt",
         Quantité: 3,
         "Prix de vente unitaire": 1000,
-        Avance: "",
-        Reste: "",
-        Statut: "",
         "Mode de paiement": "",
-        Observation: "Les colonnes de paiement sont renseignées uniquement sur la première ligne de la vente.",
+        Avance: "",
+        "Reste (contrôle)": "",
       },
       {
         "N° de vente (regroupement)": "V2",
@@ -280,11 +294,9 @@ export function ImportVentesSection() {
         Emplacement: "",
         Quantité: 20,
         "Prix de vente unitaire": 300,
-        Avance: 0,
-        Reste: 6000,
-        Statut: "Non payée",
         "Mode de paiement": "",
-        Observation: "Vente ancienne : emplacement facultatif et aucun impact sur le stock actuel.",
+        Avance: "",
+        "Reste (contrôle)": "",
       },
     ]);
   }
@@ -327,7 +339,6 @@ export function ImportVentesSection() {
 
       const articles = (articlesResult.data ?? []) as ArticleImport[];
       const stocks = (stocksResult.data ?? []) as StockImport[];
-      setArticlesImportes(articles);
 
       if (articles.length === 0) {
         setErreurGenerale("Aucun article n'est enregistré dans le stock/catalogue.");
@@ -336,11 +347,14 @@ export function ImportVentesSection() {
       }
 
       const stockParCle = new Map<string, number>();
+      const stockPourInterface: Record<string, number> = {};
       for (const stock of stocks) {
         const cle = `${stock.article_id}|${stock.emplacement_id}`;
-        stockParCle.set(cle, (stockParCle.get(cle) ?? 0) + Number(stock.quantite || 0));
+        const nouvelleQuantite = (stockParCle.get(cle) ?? 0) + Number(stock.quantite || 0);
+        stockParCle.set(cle, nouvelleQuantite);
+        stockPourInterface[cle] = nouvelleQuantite;
       }
-      setStockImportParCle(new Map(stockParCle));
+      setStockParCleImport(stockPourInterface);
 
       // Regroupe les lignes par numéro de vente.
       const parGroupe = new Map<string, LigneBrute[]>();
@@ -366,37 +380,55 @@ export function ImportVentesSection() {
 
       for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
         const premiere = lignesBrutes[0];
-        const valeurDateVente = premiere["Date de vente"];
-        const dateVente = convertirDateImport(valeurDateVente);
+        const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
         const avertissements: string[] = [];
-        if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
-          erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
-        }
+        const suggestionsArticles: string[] = [];
         const lignesResolues: LigneResolue[] = [];
+
+        if (!nomClient) {
+          erreurs.push(`Client non renseigné pour la vente « ${numero} ». Saisissez le nom du client dans la colonne Client. Aucun client ne sera créé automatiquement sans nom.`);
+        }
+
+        // L'avance est un paiement, pas un prix de vente. Elle est lue une seule
+        // fois par vente (sur la première cellule renseignée) et le reste est
+        // toujours recalculé par le système.
+        const avancesRenseignees = lignesBrutes
+          .map((ligne) => convertirMontantImport(ligne.Avance ?? ligne["Montant payé"]))
+          .filter((montant) => montant > 0);
+        const avance = avancesRenseignees[0] ?? 0;
+        const restesExcel = lignesBrutes
+          .map((ligne) => convertirMontantImport(ligne["Reste (contrôle)"] ?? ligne.Reste))
+          .filter((montant) => montant >= 0);
+        const resteExcel = restesExcel.length > 0 ? restesExcel[0] : null;
+        if (avancesRenseignees.some((montant) => Math.abs(montant - avance) > 0.01)) {
+          avertissements.push("Plusieurs avances différentes ont été renseignées pour cette même vente. La première avance renseignée sera utilisée.");
+        }
 
         for (const l of lignesBrutes) {
           const designation = String(l.Article ?? "").trim();
           const nomEmplacement = String(l.Emplacement ?? "").trim();
           const quantite = Number(l["Quantité"]);
           const prix = Number(l["Prix de vente unitaire"]) || 0;
+          let problemeEmplacement: string | undefined;
 
           if (!designation || !quantite || quantite <= 0) {
-            erreurs.push("Ligne incomplète (article et quantité obligatoires)");
-            continue;
-          }
-          if (!modeHistorique && !nomEmplacement) {
-            erreurs.push(`Article "${designation}" : emplacement obligatoire pour une vente récente`);
+            erreurs.push("Ligne incomplète : article et quantité sont obligatoires.");
             continue;
           }
 
           const correspondance = trouverArticle(designation, articles);
           if (!correspondance) {
-            erreurs.push(
-              `Article "${designation}" introuvable ou correspondance ambiguë. ` +
-              `Vérifiez la désignation ou utilisez la référence exacte de l'article.`
-            );
+            const suggestions = trouverSuggestionsArticles(designation, articles);
+            if (suggestions.length > 0) {
+              erreurs.push(`Article « ${designation} » non identifié. Choisissez une proposition ci-dessous.`);
+              suggestionsArticles.push(
+                `Article demandé : ${designation}\nPropositions : ${suggestions.map((s) => s.article.designation).join("\n")}`
+              );
+            } else {
+              erreurs.push(`Article « ${designation} » introuvable. Vérifiez la désignation.`);
+            }
             continue;
           }
 
@@ -406,7 +438,8 @@ export function ImportVentesSection() {
           // désignation enregistrée dans le catalogue, même si le fichier Excel
           // utilise une variante de nom.
           if (correspondance.type === "approx") {
-            avertissements.push(`Article « ${designation} » rapproché automatiquement de « ${article.designation} ».`);
+            // Pas une erreur : la correspondance est suffisamment forte et
+            // unique. Elle sera affichée comme une résolution automatique.
           }
 
           // En mode historique, l'emplacement n'a pas d'impact sur le stock.
@@ -414,22 +447,34 @@ export function ImportVentesSection() {
           // structure de la table lignes_ventes.
           let emplacementId: string | undefined;
           if (nomEmplacement) {
-            const emplacementTrouve = emplacements.find(
-              (e) => normaliser(e.nom) === normaliser(nomEmplacement)
-            );
-            emplacementId = emplacementTrouve?.id;
+            const emplacementTrouve = trouverEmplacementSouple(nomEmplacement, emplacements);
+            emplacementId = emplacementTrouve?.emplacement.id;
+
+            if (emplacementTrouve && !emplacementTrouve.exact) {
+              problemeEmplacement = `Emplacement « ${nomEmplacement} » rapproché de « ${emplacementTrouve.emplacement.nom} ». Vérifiez le choix.`;
+              avertissements.push(problemeEmplacement);
+            }
+
             if (!emplacementId && !modeHistorique) {
-              erreurs.push(`EMPLACEMENT_CORRECTION|${lignesBrutes.indexOf(l)}|${article.designation}|Emplacement « ${nomEmplacement} » non reconnu.`);
-              continue;
+              // Ne bloque plus l'import : on affecte provisoirement le premier
+              // emplacement actif. L'utilisateur peut immédiatement le changer
+              // dans le tableau avant de lancer l'import.
+              const emplacementParDefaut = emplacements.find((e) => e.actif) ?? emplacements[0];
+              emplacementId = emplacementParDefaut?.id;
+              if (emplacementId) {
+                problemeEmplacement = `Emplacement « ${nomEmplacement} » non reconnu. Sélectionnez le bon emplacement.`;
+                erreurs.push(problemeEmplacement);
+              }
             }
           }
 
           if (!emplacementId) {
-            if (!modeHistorique) {
-              erreurs.push(`Article "${article.designation}" : emplacement obligatoire pour une vente récente`);
-              continue;
+            const emplacementParDefaut = emplacements.find((e) => e.actif) ?? emplacements[0];
+            emplacementId = emplacementParDefaut?.id;
+            if (!modeHistorique && emplacementId) {
+              problemeEmplacement = `Aucun emplacement indiqué pour « ${article.designation} ». Sélectionnez l'emplacement avant l'import.`;
+              erreurs.push(problemeEmplacement);
             }
-            emplacementId = emplacements[0]?.id;
           }
           if (!emplacementId) {
             erreurs.push("Aucun emplacement n'existe dans le système.");
@@ -447,9 +492,20 @@ export function ImportVentesSection() {
 
             if (disponibleRestant < quantite) {
               erreurs.push(
-                `Stock insuffisant pour "${article.designation}" à "${nomEmplacement}" ` +
-                `(disponible : ${Math.max(0, disponibleRestant)}, demandé : ${quantite})`
+                `Stock insuffisant pour « ${article.designation} » à cet emplacement : disponible ${Math.max(0, disponibleRestant)}, demandé ${quantite}. Choisissez un autre emplacement.`
               );
+              lignesResolues.push({
+                article_id: article.id,
+                designation: article.designation,
+                emplacement_id: emplacementId,
+                quantite,
+                prix,
+                problemeQuantite: {
+                  disponible: Math.max(0, disponibleRestant),
+                  demande: quantite,
+                },
+                problemeEmplacement,
+              });
               continue;
             }
           }
@@ -460,6 +516,7 @@ export function ImportVentesSection() {
             emplacement_id: emplacementId,
             quantite,
             prix,
+            ...(problemeEmplacement ? { problemeEmplacement } : {}),
           });
         }
 
@@ -477,30 +534,19 @@ export function ImportVentesSection() {
         }
 
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
-
-        // Paiement : seule la colonne Avance représente l'argent réellement encaissé.
-        // Le reste et le statut sont recalculés par l'application. Les valeurs Excel
-        // de Reste/Statut servent uniquement de contrôle et ne deviennent jamais
-        // la source de vérité.
-        const premiereAvanceBrut = premiere["Avance"];
-        const avance = premiereAvanceBrut === undefined || premiereAvanceBrut === null || String(premiereAvanceBrut).trim() === ""
-          ? 0
-          : Number(premiereAvanceBrut);
-        const reste = Math.max(0, montantTotal - avance);
-        const statutPaiement: "Soldée" | "Avance" | "Non payée" =
-          reste === 0 ? "Soldée" : avance > 0 ? "Avance" : "Non payée";
-        if (!Number.isFinite(avance) || avance < 0 || avance > montantTotal) {
-          erreurs.push(`Avance invalide : « ${String(premiereAvanceBrut)} ». Elle doit être comprise entre 0 et ${montantTotal.toLocaleString("fr-FR")} FCFA.`);
+        const resteCalcule = Math.max(0, montantTotal - avance);
+        if (avance > montantTotal + 0.01) {
+          erreurs.push(`Avance invalide : ${avance.toLocaleString("fr-FR")} FCFA est supérieure au total calculé de ${montantTotal.toLocaleString("fr-FR")} FCFA.`);
         }
-        const resteBrutAnalyse = premiere["Reste"];
-        if (resteBrutAnalyse !== undefined && resteBrutAnalyse !== null && String(resteBrutAnalyse).trim() !== "") {
-          const resteExcelAnalyse = Number(resteBrutAnalyse);
-          if (!Number.isFinite(resteExcelAnalyse) || resteExcelAnalyse < 0) {
-            erreurs.push(`Reste invalide : « ${String(resteBrutAnalyse)} ».`);
-          } else if (Math.abs(resteExcelAnalyse - reste) > 0.01) {
-            avertissements.push(`Reste Excel (${resteExcelAnalyse.toLocaleString("fr-FR")} FCFA) différent du reste calculé (${reste.toLocaleString("fr-FR")} FCFA). Le calcul système est conservé.`);
-          }
+        if (resteExcel !== null && Math.abs(resteExcel - resteCalcule) > 0.01) {
+          avertissements.push(`Reste Excel (${resteExcel.toLocaleString("fr-FR")} FCFA) différent du reste calculé (${resteCalcule.toLocaleString("fr-FR")} FCFA). Le calcul système sera conservé.`);
         }
+        const statutPaiement: GroupeVente["statutPaiement"] =
+          resteCalcule <= 0.01 && montantTotal > 0
+            ? "Soldée"
+            : avance > 0
+              ? "Avance"
+              : "Non payée";
 
         // Détection de doublon : une vente déjà enregistrée pour le même
         // client, la même date et le même montant total existe-t-elle
@@ -530,13 +576,14 @@ export function ImportVentesSection() {
           dateVente,
           nomClient,
           montantTotal,
-          avance: Number.isFinite(avance) ? avance : 0,
-          reste,
+          avance,
+          reste: resteCalcule,
           statutPaiement,
           erreurs,
-          avertissements,
           doublonProbable,
+          avertissements,
           valide: erreurs.length === 0,
+          suggestionsArticles,
         });
       }
 
@@ -551,61 +598,6 @@ export function ImportVentesSection() {
       );
     }
     setAnalyse(false);
-  }
-
-  function corrigerEmplacement(numero: string, indexLigne: number, emplacementId: string) {
-    const emplacement = emplacements.find((e) => e.id === emplacementId);
-    if (!emplacement) return;
-
-    setGroupes((precedents) => precedents.map((g) => {
-      if (g.numero !== numero) return g;
-      const lignesBrutes = g.lignesBrutes.map((ligne, index) =>
-        index === indexLigne ? { ...ligne, Emplacement: emplacement.nom } : ligne
-      );
-      const ligneBrute = lignesBrutes[indexLigne];
-      if (!ligneBrute) return g;
-      const designation = String(ligneBrute.Article ?? "").trim();
-      const quantite = Number(ligneBrute["Quantité"]);
-      const prix = Number(ligneBrute["Prix de vente unitaire"]) || 0;
-      const correspondance = trouverArticle(designation, articlesImportes);
-      if (!correspondance || !quantite || quantite <= 0) return g;
-
-      const cleStock = `${correspondance.article.id}|${emplacementId}`;
-      const disponible = stockImportParCle.get(cleStock) ?? 0;
-      const dejaResolue = g.lignesResolues
-        .filter((l) => `${l.article_id}|${l.emplacement_id}` === cleStock)
-        .reduce((s, l) => s + l.quantite, 0);
-      if (!modeHistorique && disponible - dejaResolue < quantite) {
-        return {
-          ...g,
-          lignesBrutes,
-          erreurs: g.erreurs.map((e) => e.includes(`|${indexLigne}|`) ? `Stock insuffisant pour « ${correspondance.article.designation} » à « ${emplacement.nom} » (disponible : ${Math.max(0, disponible - dejaResolue)}, demandé : ${quantite}).` : e),
-        };
-      }
-
-      const anciennesErreurs = g.erreurs.filter((e) => !e.startsWith(`EMPLACEMENT_CORRECTION|${indexLigne}|`));
-      const lignesResolues = [...g.lignesResolues, {
-        article_id: correspondance.article.id,
-        designation: correspondance.article.designation,
-        emplacement_id: emplacementId,
-        quantite,
-        prix,
-      }];
-      const montantTotal = lignesResolues.reduce((sum, l) => sum + l.quantite * l.prix, 0);
-      const avance = Number.isFinite(g.avance) ? g.avance : 0;
-      const reste = Math.max(0, montantTotal - avance);
-      const statutPaiement: "Soldée" | "Avance" | "Non payée" = reste === 0 ? "Soldée" : avance > 0 ? "Avance" : "Non payée";
-      return {
-        ...g,
-        lignesBrutes,
-        lignesResolues,
-        montantTotal,
-        reste,
-        statutPaiement,
-        erreurs: anciennesErreurs,
-        valide: anciennesErreurs.length === 0,
-      };
-    }));
   }
 
   async function confirmerImport() {
@@ -736,30 +728,25 @@ export function ImportVentesSection() {
         }
       }
 
-      // L'avance a déjà été validée et calculée pendant l'analyse.
-      // Le système crée uniquement le paiement réellement encaissé.
-      const avance = groupe.avance;
-      if (avance > 0) {
+      if (groupe.avance > 0) {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
-          montant: avance,
+          montant: groupe.avance,
           mode_paiement: String(groupe.lignesBrutes[0]?.["Mode de paiement"] ?? "").trim() || "Espèces",
           date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
         if (paiementError) {
-          erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+          erreursDetail.push(`Vente ${groupe.numero} : paiement de ${groupe.avance.toLocaleString("fr-FR")} FCFA non enregistré.`);
+          echouees += 1;
+          continue;
         }
       }
 
-      const { error: statutPaiementError } = await supabase
-        .from("ventes")
-        .update({ statut: groupe.statutPaiement })
-        .eq("id", vente.id);
-      if (statutPaiementError) {
-        erreursDetail.push(`Vente ${groupe.numero} : statut de paiement non mis à jour : ${statutPaiementError.message}`);
-      }
-
+      // Le statut métier de la vente reste celui géré par la validation
+      // (ex. « Validé »). Le statut de paiement (Soldée / Avance / Non payée)
+      // est calculé à partir de paiements_ventes dans la synthèse. On ne mélange
+      // donc jamais statut de vente et statut d'encaissement.
       reussies += 1;
     }
 
@@ -782,6 +769,75 @@ export function ImportVentesSection() {
   const nbValides = groupes.filter((g) => g.valide).length;
   const nbErreurs = groupes.length - nbValides;
   const nbDoublons = groupes.filter((g) => g.doublonProbable).length;
+  const nbAvertissements = groupes.reduce((total, g) => total + g.avertissements.length, 0);
+
+  function changerEmplacement(numero: string, indexLigne: number, emplacementId: string) {
+    setGroupes((precedents) =>
+      precedents.map((g) => {
+        if (g.numero !== numero) return g;
+
+        const lignesSansCourante = g.lignesResolues.filter((_, index) => index !== indexLigne);
+        const ligneCourante = g.lignesResolues[indexLigne];
+        if (!ligneCourante) return g;
+
+        const cleStock = `${ligneCourante.article_id}|${emplacementId}`;
+        const disponible = stockParCleImport[cleStock] ?? 0;
+        const demandeAutresLignes = precedents.reduce((total, groupe) => {
+          return total + groupe.lignesResolues.reduce((somme, ligne) => {
+            if (ligne === ligneCourante) return somme;
+            return `${ligne.article_id}|${ligne.emplacement_id}` === cleStock
+              ? somme + ligne.quantite
+              : somme;
+          }, 0);
+        }, 0);
+        const demandeDansCetteVente = lignesSansCourante.reduce(
+          (total, ligne) =>
+            `${ligne.article_id}|${ligne.emplacement_id}` === cleStock
+              ? total + ligne.quantite
+              : total,
+          0
+        );
+        const disponibleRestant = disponible - demandeAutresLignes - demandeDansCetteVente;
+        const problemeQuantite = disponibleRestant < ligneCourante.quantite
+          ? { disponible: Math.max(0, disponibleRestant), demande: ligneCourante.quantite }
+          : undefined;
+
+        const nouvelleLigne = {
+          ...ligneCourante,
+          emplacement_id: emplacementId,
+          problemeEmplacement: undefined,
+          problemeQuantite,
+        };
+
+        const lignes = g.lignesResolues.map((ligne, index) =>
+          index === indexLigne ? nouvelleLigne : ligne
+        );
+
+        const avertissements = g.avertissements.filter((a) =>
+          !a.includes(`Emplacement «`) &&
+          !a.includes(`Stock insuffisant pour « ${ligneCourante.designation} »`)
+        );
+
+        const erreurs = g.erreurs.filter((e) =>
+          !e.includes(`Emplacement «`) &&
+          !e.includes(`Aucun emplacement indiqué pour « ${ligneCourante.designation} »`) &&
+          !e.includes(`Stock insuffisant pour « ${ligneCourante.designation} »`)
+        );
+
+        if (problemeQuantite) {
+          erreurs.push(`Stock insuffisant pour « ${ligneCourante.designation} » à cet emplacement : disponible ${problemeQuantite.disponible}, demandé ${problemeQuantite.demande}. Choisissez un autre emplacement.`);
+        }
+
+        return {
+          ...g,
+          lignesResolues: lignes,
+          erreurs,
+          avertissements,
+          valide: erreurs.length === 0,
+        };
+      })
+    );
+  }
 
   return (
     <div className="rounded-xl border border-onyx-100 bg-white p-5">
@@ -882,6 +938,11 @@ export function ImportVentesSection() {
                 <AlertCircle size={14} /> {nbDoublons} doublon(s) possible(s)
               </span>
             )}
+            {nbAvertissements > 0 && (
+              <span className="flex items-center gap-1 text-amber-600">
+                <AlertCircle size={14} /> {nbAvertissements} avertissement{nbAvertissements > 1 ? "s" : ""}
+              </span>
+            )}
           </div>
 
           <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-onyx-100">
@@ -891,8 +952,9 @@ export function ImportVentesSection() {
                   <th className="px-3 py-2">N°</th>
                   <th className="px-3 py-2">Client</th>
                   <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Articles</th>
+                  <th className="px-3 py-2">Total</th>
                   <th className="px-3 py-2">Paiement</th>
+                  <th className="px-3 py-2">Articles</th>
                   <th className="px-3 py-2">Statut</th>
                 </tr>
               </thead>
@@ -901,77 +963,126 @@ export function ImportVentesSection() {
                   <tr key={g.numero} className="border-t border-onyx-50">
                     <td className="px-3 py-2 text-onyx-400">{g.numero}</td>
                     <td className="px-3 py-2 text-onyx-700">
-                      {g.nomClient || "—"}
+                      {g.nomClient || "Client non renseigné"}
                     </td>
                     <td className="px-3 py-2 text-onyx-500">{g.dateVente ?? "—"}</td>
+                    <td className="px-3 py-2 text-right align-top font-medium text-onyx-700">
+                      {g.montantTotal.toLocaleString("fr-FR")} FCFA
+                    </td>
+                    <td className="px-3 py-2 align-top text-onyx-500">
+                      <div>{g.avance.toLocaleString("fr-FR")} FCFA avancés</div>
+                      <div className="font-medium text-onyx-700">Reste : {g.reste.toLocaleString("fr-FR")} FCFA</div>
+                    </td>
                     <td className="px-3 py-2 align-top text-onyx-500">
                       {g.lignesResolues.length > 0 ? (
-                        <div className="space-y-1">
-                          {g.lignesResolues.map((l, i) => (
-                            <div key={`${g.numero}-article-${i}`} className="leading-5">
-                              {l.designation}
-                            </div>
-                          ))}
+                        <div className="space-y-1.5">
+                          {g.lignesResolues.map((l, i) => {
+                            const attention = Boolean(l.problemeQuantite || l.problemeEmplacement);
+                            return (
+                              <div key={`${g.numero}-article-${i}`} className={`rounded-md border p-2 ${attention ? "border-amber-200 bg-amber-50/40" : "border-onyx-100 bg-white"}`}>
+                                <div className="flex items-start gap-2">
+                                  <div className="min-w-0 flex-1 font-medium text-onyx-700">{l.designation}</div>
+                                  {attention && (
+                                    <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-600" />
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         "—"
                       )}
                     </td>
                     <td className="px-3 py-2 align-top">
-                      <div className="space-y-0.5 text-xs">
-                        <div className="font-medium text-onyx-700">Total {g.montantTotal.toLocaleString("fr-FR")} FCFA</div>
-                        <div className="text-emerald-600">Avance {g.avance.toLocaleString("fr-FR")} FCFA</div>
-                        <div className={g.reste > 0 ? "text-red-600" : "text-emerald-600"}>Reste {g.reste.toLocaleString("fr-FR")} FCFA</div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      {!g.valide ? (
-                        <div className="space-y-1">
+                      <div className="space-y-2">
+                        {g.valide ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                            <CheckCircle2 size={12} /> Prête à importer
+                          </span>
+                        ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">
                             <AlertCircle size={12} /> Erreur — import bloqué
                           </span>
-                          <div className="max-w-md space-y-1 text-red-600">
-                            {g.erreurs.map((erreur, i) => {
-                              if (erreur.startsWith("EMPLACEMENT_CORRECTION|")) {
-                                const [, indexTexte, article, message] = erreur.split("|");
-                                const indexLigne = Number(indexTexte);
-                                return (
-                                  <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">
-                                    <div className="mb-1 font-medium">{message} Article : {article}</div>
+                        )}
+
+                        <div className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${
+                          g.statutPaiement === "Soldée"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : g.statutPaiement === "Avance"
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-onyx-100 text-onyx-600"
+                        }`}>
+                          Paiement : {g.statutPaiement}
+                        </div>
+
+                        {g.doublonProbable && (
+                          <div className="rounded-md bg-amber-50 px-2.5 py-2 text-amber-700">
+                            <div className="font-semibold">Doublon possible</div>
+                            <div className="text-[11px]">Vérification recommandée avant l&apos;import.</div>
+                          </div>
+                        )}
+
+                        {g.lignesResolues.some((l) => l.problemeQuantite || l.problemeEmplacement) && (
+                          <div className="space-y-1.5">
+                            {g.lignesResolues.map((l, i) => {
+                              if (!l.problemeQuantite && !l.problemeEmplacement) return null;
+                              return (
+                                <div key={`${g.numero}-probleme-${i}`} className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800">
+                                  <div className="font-semibold text-amber-900">{l.designation}</div>
+                                  {l.problemeQuantite && (
+                                    <div className="mt-1 rounded bg-red-50 px-2 py-1.5 text-red-700">
+                                      <div className="font-semibold">Problème de quantité</div>
+                                      <div>Disponible : <strong>{l.problemeQuantite.disponible}</strong> · Demandé : <strong>{l.problemeQuantite.demande}</strong></div>
+                                      <div className="mt-0.5">Choisissez un autre emplacement ci-dessous pour vérifier un autre stock.</div>
+                                    </div>
+                                  )}
+                                  {l.problemeEmplacement && (
+                                    <div className="mt-1">{l.problemeEmplacement}</div>
+                                  )}
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <MapPin size={12} className="shrink-0 text-amber-600" />
                                     <select
-                                      defaultValue=""
-                                      onChange={(e) => e.target.value && corrigerEmplacement(g.numero, indexLigne, e.target.value)}
-                                      className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-xs text-onyx-800"
+                                      value={l.emplacement_id}
+                                      onChange={(e) => changerEmplacement(g.numero, i, e.target.value)}
+                                      className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-xs text-onyx-700 outline-none focus:border-accent-400"
                                     >
-                                      <option value="">Choisir le bon emplacement…</option>
-                                      {emplacements.map((emplacement) => (
-                                        <option key={emplacement.id} value={emplacement.id}>{emplacement.nom}</option>
+                                      {emplacements.map((e) => (
+                                        <option key={e.id} value={e.id}>{e.nom}</option>
                                       ))}
                                     </select>
                                   </div>
-                                );
-                              }
-                              return <div key={i} className="leading-5">{erreur}</div>;
+                                </div>
+                              );
                             })}
-                            {g.avertissements.length > 0 && (
-                              <div className="mt-2 space-y-1 text-amber-600">
-                                {g.avertissements.map((avertissement, i) => <div key={i} className="leading-5">⚠ {avertissement}</div>)}
-                              </div>
-                            )}
                           </div>
-                        </div>
-                      ) : g.doublonProbable ? (
-                        <div className="space-y-1">
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">
-                            <AlertCircle size={12} /> Doublon possible — vérification recommandée
-                          </span>
-                          <div className="text-amber-600">La vente reste importable, mais vérifiez qu&apos;elle n&apos;existe pas déjà.</div>
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
-                          <CheckCircle2 size={12} /> Prête à importer
-                        </span>
-                      )}
+                        )}
+
+                        {g.erreurs.length > 0 && (
+                          <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-red-700">
+                            <div className="font-semibold">Éléments bloquants</div>
+                            <div className="mt-1 space-y-1">
+                              {g.erreurs.map((erreur, i) => <div key={i}>{erreur}</div>)}
+                            </div>
+                          </div>
+                        )}
+
+                        {g.suggestionsArticles.length > 0 && (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
+                            <div className="font-semibold">Article à identifier</div>
+                            {g.suggestionsArticles.flatMap((bloc, blocIndex) => bloc.split("\n").map((ligne, ligneIndex) => (
+                              <div key={`${blocIndex}-${ligneIndex}`} className={ligne.startsWith("Propositions :") || ligne.startsWith("Article demandé :") ? "mt-1" : "ml-2 mt-0.5"}>
+                                {ligne}
+                              </div>
+                            )))}
+                            <div className="mt-2 text-[11px] text-amber-700">Corrigez le nom dans le fichier puis relancez l&apos;analyse.</div>
+                          </div>
+                        )}
+
+                        {g.valide && !g.doublonProbable && g.avertissements.length === 0 && (
+                          <span className="text-[11px] text-onyx-400">Aucune action requise.</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
