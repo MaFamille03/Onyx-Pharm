@@ -16,7 +16,6 @@ type ClientSynthese = {
   total_achats: number;
   total_paye: number;
   total_du: number;
-  panier_moyen: number;
   derniere_vente: string | null;
 };
 
@@ -83,7 +82,7 @@ export function VentesSynthese() {
         .lt("date_paiement", finQuery),
       supabase
         .from("v_synthese_clients_ventes")
-        .select("client_id, client_nom, nombre_ventes, total_achats, total_paye, total_du, panier_moyen, derniere_vente")
+        .select("client_id, client_nom, nombre_ventes, total_achats, total_paye, total_du, derniere_vente")
         .order("total_du", { ascending: false }),
     ]);
 
@@ -115,16 +114,16 @@ export function VentesSynthese() {
   const totalVentes = ventes.reduce((s, v) => s + v.montant_total, 0);
   const encaissementsPeriode = paiements.reduce((s, p) => s + Number(p.montant), 0);
   const nombreVentes = ventes.length;
-  const panierMoyen = nombreVentes ? totalVentes / nombreVentes : 0;
   const clientsActifsPeriode = new Set(ventes.map((v) => v.client_id).filter(Boolean)).size;
   const creancesGlobales = clients.reduce((s, c) => s + Math.max(0, c.total_du), 0);
 
   const classementPeriode = useMemo(() => {
-    const map = new Map<string, { nom: string; ventes: number; ca: number; clientId: string | null }>();
+    const map = new Map<string, { nom: string; ventes: number; ca: number; clientId: string }>();
     for (const v of ventes) {
-      const key = v.client_id ?? "__passage__";
+      if (!v.client_id) continue;
+      const key = v.client_id;
       const actuel = map.get(key) ?? {
-        nom: v.clients?.[0]?.nom ?? "Client de passage",
+        nom: v.clients?.[0]?.nom ?? "Client sans nom",
         ventes: 0,
         ca: 0,
         clientId: v.client_id,
@@ -158,14 +157,13 @@ export function VentesSynthese() {
     exporterExcelMisEnForme(
       "Synthese_Ventes_Onyx_Pharm",
       "Clients",
-      ["Client", "Nombre de ventes", "Total achats", "Total payé", "Total dû", "Panier moyen", "Dernière vente"],
+      ["Client", "Nombre de ventes", "Total achats", "Total payé", "Total dû", "Dernière vente"],
       clients.map((c) => ({
         Client: c.client_nom,
         "Nombre de ventes": c.nombre_ventes,
         "Total achats": c.total_achats,
         "Total payé": c.total_paye,
         "Total dû": c.total_du,
-        "Panier moyen": c.panier_moyen,
         "Dernière vente": c.derniere_vente ?? "",
       }))
     );
@@ -198,7 +196,7 @@ export function VentesSynthese() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl bg-onyx-50 p-3">
           <p className="text-xs text-onyx-500">Nombre de ventes</p>
           <p className="mt-1 text-lg font-semibold text-onyx-900">{nombreVentes}</p>
@@ -211,50 +209,48 @@ export function VentesSynthese() {
           <p className="text-xs text-onyx-500">Encaissements période</p>
           <p className="mt-1 text-lg font-semibold text-emerald-600">{fcfa(encaissementsPeriode)}</p>
         </div>
-        <div className="rounded-xl bg-onyx-50 p-3">
-          <p className="text-xs text-onyx-500">Panier moyen</p>
-          <p className="mt-1 text-lg font-semibold text-onyx-900">{fcfa(panierMoyen)}</p>
-        </div>
         <div className="rounded-xl bg-red-50 p-3">
           <p className="text-xs text-red-600">Créances clients totales</p>
           <p className="mt-1 text-lg font-semibold text-red-700">{fcfa(creancesGlobales)}</p>
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="mt-4 space-y-4">
         <div className="rounded-xl border border-onyx-100">
-          <div className="flex items-center justify-between border-b border-onyx-100 px-4 py-3">
-            <div>
-              <h3 className="text-sm font-semibold text-onyx-800">Période analysée</h3>
-              <p className="text-xs text-onyx-400">Du {new Date(debut).toLocaleDateString("fr-FR")} au {new Date(fin).toLocaleDateString("fr-FR")}</p>
+          <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+            <div className="flex min-w-[170px] items-center gap-2">
+              <CalendarDays size={16} className="text-onyx-400" />
+              <div>
+                <h3 className="text-sm font-semibold text-onyx-800">Période analysée</h3>
+                <p className="text-[11px] text-onyx-400">Du {new Date(debut).toLocaleDateString("fr-FR")} au {new Date(fin).toLocaleDateString("fr-FR")}</p>
+              </div>
             </div>
-            <CalendarDays size={17} className="text-onyx-400" />
-          </div>
-          <div className="grid grid-cols-2 gap-3 p-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-onyx-600">Du</label>
-              <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-3 py-2 text-sm" />
+            <div className="flex min-w-[150px] flex-1 items-center gap-2">
+              <label className="whitespace-nowrap text-xs font-medium text-onyx-600">Du</label>
+              <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-2.5 py-1.5 text-sm" />
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-onyx-600">Au</label>
-              <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-3 py-2 text-sm" />
+            <div className="flex min-w-[150px] flex-1 items-center gap-2">
+              <label className="whitespace-nowrap text-xs font-medium text-onyx-600">Au</label>
+              <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-2.5 py-1.5 text-sm" />
             </div>
-          </div>
-          <div className="border-t border-onyx-100 px-4 py-3 text-xs text-onyx-500">
-            <Users size={14} className="mr-1 inline" /> {clientsActifsPeriode} client(s) distinct(s) ayant acheté sur la période.
+            <div className="flex items-center whitespace-nowrap text-xs text-onyx-500">
+              <Users size={14} className="mr-1.5" /> {clientsActifsPeriode} client(s) distinct(s)
+            </div>
           </div>
         </div>
 
         <div className="rounded-xl border border-onyx-100">
-          <div className="border-b border-onyx-100 px-4 py-3">
-            <h3 className="text-sm font-semibold text-onyx-800">Clients — achats sur la période</h3>
-            <p className="text-xs text-onyx-400">Classement par chiffre d&apos;affaires, sans confondre CA et paiement.</p>
+          <div className="flex items-center justify-between border-b border-onyx-100 px-4 py-2.5">
+            <div>
+              <h3 className="text-sm font-semibold text-onyx-800">Clients — achats sur la période</h3>
+              <p className="text-xs text-onyx-400">Classement par chiffre d&apos;affaires, sans confondre CA et paiement.</p>
+            </div>
           </div>
-          <div className="max-h-72 overflow-auto">
+          <div className="max-h-56 overflow-auto">
             {classementPeriode.length === 0 ? (
-              <p className="p-4 text-sm text-onyx-400">Aucune vente sur cette période.</p>
+              <p className="p-4 text-sm text-onyx-400">Aucun client avec une vente sur cette période.</p>
             ) : classementPeriode.map((c) => (
-              <div key={c.clientId ?? c.nom} className="flex items-center justify-between gap-3 border-b border-onyx-50 px-4 py-3 last:border-0">
+              <div key={c.clientId} className="flex items-center justify-between gap-3 border-b border-onyx-50 px-4 py-2.5 last:border-0">
                 <div>
                   <p className="text-sm font-medium text-onyx-800">{c.nom}</p>
                   <p className="text-xs text-onyx-400">{c.ventes} commande{c.ventes > 1 ? "s" : ""}</p>
@@ -274,7 +270,7 @@ export function VentesSynthese() {
         {loading ? (
           <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p>
         ) : (
-          <table className="w-full min-w-[850px] text-sm">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="border-b border-onyx-100 bg-onyx-50/50 text-left text-xs uppercase tracking-wide text-onyx-400">
                 <th className="px-4 py-3">Client</th>
@@ -282,7 +278,6 @@ export function VentesSynthese() {
                 <th className="px-4 py-3 text-right">Total achats</th>
                 <th className="px-4 py-3 text-right">Total payé</th>
                 <th className="px-4 py-3 text-right">Total dû</th>
-                <th className="px-4 py-3 text-right">Panier moyen</th>
                 <th className="px-4 py-3">Dernier achat</th>
               </tr>
             </thead>
@@ -294,7 +289,6 @@ export function VentesSynthese() {
                   <td className="px-4 py-3 text-right text-onyx-700">{fcfa(c.total_achats)}</td>
                   <td className="px-4 py-3 text-right text-emerald-600">{fcfa(c.total_paye)}</td>
                   <td className={`px-4 py-3 text-right font-semibold ${c.total_du > 0 ? "text-red-600" : "text-onyx-400"}`}>{fcfa(Math.max(0, c.total_du))}</td>
-                  <td className="px-4 py-3 text-right text-onyx-500">{fcfa(c.panier_moyen)}</td>
                   <td className="px-4 py-3 text-onyx-500">{c.derniere_vente ? new Date(c.derniere_vente).toLocaleDateString("fr-FR") : "—"}</td>
                 </tr>
               ))}
