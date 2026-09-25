@@ -534,6 +534,7 @@ export function ImportVentesSection() {
           reste,
           statutPaiement,
           erreurs,
+          avertissements,
           doublonProbable,
           valide: erreurs.length === 0,
         });
@@ -742,7 +743,7 @@ export function ImportVentesSection() {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
           montant: avance,
-          mode_paiement: String(premiere["Mode de paiement"] ?? "").trim() || "Espèces",
+          mode_paiement: String(groupe.lignesBrutes[0]?.["Mode de paiement"] ?? "").trim() || "Espèces",
           date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
