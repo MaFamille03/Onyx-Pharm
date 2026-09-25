@@ -415,7 +415,8 @@ export function ImportVentesSection() {
         const nomClient = String(premiere.Client ?? "").trim();
         const lignesResolues: LigneResolue[] = [];
 
-        for (const [ligneIndex, l] of lignesBrutes.entries()) {
+        for (let ligneIndex = 0; ligneIndex < lignesBrutes.length; ligneIndex++) {
+          const l = lignesBrutes[ligneIndex];
           const designation = String(l.Article ?? "").trim();
           const correctionEmplacement = correctionsEmplacements[`${numero}|${ligneIndex}`];
           const nomEmplacement = correctionEmplacement
