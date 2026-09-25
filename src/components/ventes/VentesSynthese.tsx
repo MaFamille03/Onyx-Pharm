@@ -37,6 +37,15 @@ type PaiementPeriode = {
   vente_id: string;
 };
 
+type LigneCommande = {
+  id: string;
+  quantite: number;
+  prix_vente_reel: number;
+  remise: number;
+  articles: { designation: string }[] | null;
+  emplacements: { nom: string }[] | null;
+};
+
 function debutMoisCourant() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -57,6 +66,9 @@ export function VentesSynthese() {
   const [error, setError] = useState<string | null>(null);
   const [clientOuvertId, setClientOuvertId] = useState<string | null>(null);
   const [venteOuverteId, setVenteOuverteId] = useState<string | null>(null);
+  const [lignesCommande, setLignesCommande] = useState<LigneCommande[]>([]);
+  const [paiementsCommande, setPaiementsCommande] = useState<PaiementPeriode[]>([]);
+  const [loadingCommande, setLoadingCommande] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,6 +134,44 @@ export function VentesSynthese() {
   // La synthèse reste synchronisée avec les paiements et les ventes : une
   // validation de paiement met donc immédiatement à jour le client et ses FAC.
   useRealtimeRefresh(["ventes", "paiements_ventes"], load);
+
+  useEffect(() => {
+    let actif = true;
+    async function chargerCommande() {
+      if (!venteOuverteId) {
+        setLignesCommande([]);
+        setPaiementsCommande([]);
+        return;
+      }
+      setLoadingCommande(true);
+      const [lignesRes, paiementsRes] = await Promise.all([
+        supabase
+          .from("lignes_ventes")
+          .select("id, quantite, prix_vente_reel, remise, articles(designation), emplacements(nom)")
+          .eq("vente_id", venteOuverteId),
+        supabase
+          .from("paiements_ventes")
+          .select("montant, date_paiement, vente_id")
+          .eq("vente_id", venteOuverteId)
+          .order("date_paiement", { ascending: false }),
+      ]);
+
+      if (!actif) return;
+      if (lignesRes.error) {
+        setError(logSupabaseError({ table: "lignes_ventes", operation: "select détails commande" }, lignesRes.error, "Impossible de charger les articles de cette commande."));
+      } else {
+        setLignesCommande((lignesRes.data ?? []) as LigneCommande[]);
+      }
+      if (paiementsRes.error) {
+        setError((prev) => prev ?? logSupabaseError({ table: "paiements_ventes", operation: "select détails commande" }, paiementsRes.error, "Impossible de charger les paiements de cette commande."));
+      } else {
+        setPaiementsCommande((paiementsRes.data ?? []) as PaiementPeriode[]);
+      }
+      setLoadingCommande(false);
+    }
+    chargerCommande();
+    return () => { actif = false; };
+  }, [venteOuverteId, supabase]);
 
   const totalVentes = ventes.reduce((s, v) => s + v.montant_total, 0);
   const encaissementsPeriode = paiements.reduce((s, p) => s + Number(p.montant), 0);
@@ -323,11 +373,67 @@ export function VentesSynthese() {
                       </div>
                     </button>
                     {ouvert && (
-                      <div className="grid grid-cols-2 gap-2 bg-onyx-50/50 px-10 pb-3 pt-1 text-xs sm:grid-cols-4">
-                        <div><p className="text-onyx-400">Total</p><p className="font-semibold text-onyx-700">{fcfa(total)}</p></div>
-                        <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(paye)}</p></div>
-                        <div><p className="text-onyx-400">Reste</p><p className={`font-semibold ${reste > 0 ? "text-red-600" : "text-onyx-500"}`}>{fcfa(reste)}</p></div>
-                        <div><p className="text-onyx-400">Statut</p><p className="font-semibold text-onyx-700">{v.statut}</p></div>
+                      <div className="bg-onyx-50/50 px-10 pb-4 pt-2">
+                        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                          <div><p className="text-onyx-400">Total</p><p className="font-semibold text-onyx-700">{fcfa(total)}</p></div>
+                          <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(paye)}</p></div>
+                          <div><p className="text-onyx-400">Reste</p><p className={`font-semibold ${reste > 0 ? "text-red-600" : "text-onyx-500"}`}>{fcfa(reste)}</p></div>
+                          <div><p className="text-onyx-400">Statut</p><p className="font-semibold text-onyx-700">{v.statut}</p></div>
+                        </div>
+
+                        <div className="mt-3 rounded-lg border border-onyx-100 bg-white">
+                          <div className="border-b border-onyx-100 px-3 py-2">
+                            <p className="text-xs font-semibold text-onyx-700">Détails de la commande</p>
+                            <p className="text-[11px] text-onyx-400">Articles réellement enregistrés sur cette facture.</p>
+                          </div>
+                          {loadingCommande ? (
+                            <p className="px-3 py-4 text-xs text-onyx-400">Chargement des détails...</p>
+                          ) : lignesCommande.length === 0 ? (
+                            <p className="px-3 py-4 text-xs text-onyx-400">Aucune ligne d&apos;article enregistrée.</p>
+                          ) : (
+                            <div className="divide-y divide-onyx-50">
+                              {lignesCommande.map((ligne) => {
+                                const prix = Number(ligne.prix_vente_reel) || 0;
+                                const quantite = Number(ligne.quantite) || 0;
+                                const remise = Number(ligne.remise) || 0;
+                                const sousTotal = Math.max(0, quantite * prix - remise);
+                                return (
+                                  <div key={ligne.id} className="px-3 py-2.5 text-xs">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="font-medium text-onyx-800">{ligne.articles?.[0]?.designation || "Article enregistré"}</p>
+                                        <p className="mt-0.5 text-[11px] text-onyx-400">
+                                          Qté {quantite} × {fcfa(prix)}
+                                          {ligne.emplacements?.[0]?.nom ? ` · ${ligne.emplacements[0].nom}` : ""}
+                                          {remise > 0 ? ` · remise ${fcfa(remise)}` : ""}
+                                        </p>
+                                      </div>
+                                      <p className="shrink-0 font-semibold text-onyx-800">{fcfa(sousTotal)}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-3 rounded-lg border border-onyx-100 bg-white">
+                          <div className="border-b border-onyx-100 px-3 py-2">
+                            <p className="text-xs font-semibold text-onyx-700">Paiements enregistrés</p>
+                          </div>
+                          {paiementsCommande.length === 0 ? (
+                            <p className="px-3 py-3 text-xs text-onyx-400">Aucun paiement enregistré sur cette facture.</p>
+                          ) : (
+                            <div className="divide-y divide-onyx-50">
+                              {paiementsCommande.map((paiement, index) => (
+                                <div key={`${paiement.date_paiement}-${index}`} className="flex items-center justify-between px-3 py-2 text-xs">
+                                  <span className="text-onyx-500">{new Date(paiement.date_paiement).toLocaleDateString("fr-FR")}</span>
+                                  <span className="font-semibold text-emerald-600">{fcfa(Number(paiement.montant) || 0)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
