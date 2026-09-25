@@ -18,8 +18,11 @@ const COLONNES_MODELE = [
   "Emplacement",
   "Quantité",
   "Prix de vente unitaire",
+  "Avance",
+  "Reste",
+  "Statut",
   "Mode de paiement",
-  "Montant payé",
+  "Observation",
 ];
 
 type LigneBrute = Record<string, unknown>;
@@ -206,6 +209,33 @@ export function ImportVentesSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeHistorique]);
 
+  function convertirDateImport(valeur: unknown): string | null {
+    if (valeur === undefined || valeur === null || String(valeur).trim() === "") return null;
+    if (valeur instanceof Date && !Number.isNaN(valeur.getTime())) {
+      return valeur.toISOString().slice(0, 10);
+    }
+    const texte = String(valeur).trim();
+    if (/^\d+(\.\d+)?$/.test(texte)) {
+      const serial = Number(texte);
+      if (serial > 20000 && serial < 100000) {
+        const date = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+        return date.toISOString().slice(0, 10);
+      }
+    }
+    const iso = texte.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) {
+      const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00Z`);
+      return Number.isNaN(d.getTime()) ? null : texte;
+    }
+    const fr = texte.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (fr) {
+      const [, jour, mois, annee] = fr;
+      const d = new Date(Date.UTC(Number(annee), Number(mois) - 1, Number(jour)));
+      return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    }
+    return null;
+  }
+
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
       {
@@ -216,8 +246,11 @@ export function ImportVentesSection() {
         Emplacement: emplacements[0]?.nom ?? "Entrepôt",
         Quantité: 10,
         "Prix de vente unitaire": 500,
+        Avance: 3000,
+        Reste: 2000,
+        Statut: "Avance",
         "Mode de paiement": "Espèces",
-        "Montant payé": 5000,
+        Observation: "",
       },
       {
         "N° de vente (regroupement)": "V1",
@@ -227,8 +260,11 @@ export function ImportVentesSection() {
         Emplacement: emplacements[0]?.nom ?? "Entrepôt",
         Quantité: 3,
         "Prix de vente unitaire": 1000,
+        Avance: "",
+        Reste: "",
+        Statut: "",
         "Mode de paiement": "",
-        "Montant payé": "",
+        Observation: "Les colonnes de paiement sont renseignées uniquement sur la première ligne de la vente.",
       },
       {
         "N° de vente (regroupement)": "V2",
@@ -238,8 +274,11 @@ export function ImportVentesSection() {
         Emplacement: "",
         Quantité: 20,
         "Prix de vente unitaire": 300,
+        Avance: 0,
+        Reste: 6000,
+        Statut: "Non payée",
         "Mode de paiement": "",
-        "Montant payé": "",
+        Observation: "Vente ancienne : emplacement facultatif et aucun impact sur le stock actuel.",
       },
     ]);
   }
@@ -319,7 +358,11 @@ export function ImportVentesSection() {
 
       for (const [numero, lignesBrutes] of Array.from(parGroupe.entries())) {
         const premiere = lignesBrutes[0];
-        const dateVente = String(premiere["Date de vente"] ?? "").trim() || null;
+        const valeurDateVente = premiere["Date de vente"];
+        const dateVente = convertirDateImport(valeurDateVente);
+        if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
+          erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ». Utilisez une date valide.`);
+        }
         const nomClient = String(premiere.Client ?? "").trim();
         const erreurs: string[] = [];
         const lignesResolues: LigneResolue[] = [];
@@ -509,8 +552,8 @@ export function ImportVentesSection() {
       }
 
       const { data: refData, error: refError } = await supabase.rpc(
-        "generer_numero_facture",
-        { p_date: groupe.dateVente ?? new Date().toISOString().slice(0, 10) }
+        "generer_numero_document",
+        { p_prefixe: "FAC" }
       );
       if (refError || !refData) {
         erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
@@ -603,15 +646,31 @@ export function ImportVentesSection() {
       }
 
       const premiere = groupe.lignesBrutes[0];
-      const montantPaye = Number(premiere["Montant payé"]) || 0;
-      if (montantPaye > 0) {
-        await supabase.from("paiements_ventes").insert({
+      const avanceBrut = premiere["Avance"];
+      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === ""
+        ? 0
+        : Number(avanceBrut);
+      const resteBrut = premiere["Reste"];
+      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === ""
+        ? null
+        : Number(resteBrut);
+      const resteCalcule = Math.max(0, groupe.montantTotal - avance);
+      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
+        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
+      } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
+        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
+      }
+      if (avance > 0) {
+        const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
-          montant: montantPaye,
+          montant: avance,
           mode_paiement: String(premiere["Mode de paiement"] ?? "").trim() || "Espèces",
           date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
+        if (paiementError) {
+          erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+        }
       }
 
       reussies += 1;
@@ -754,7 +813,7 @@ export function ImportVentesSection() {
                   <tr key={g.numero} className="border-t border-onyx-50">
                     <td className="px-3 py-2 text-onyx-400">{g.numero}</td>
                     <td className="px-3 py-2 text-onyx-700">
-                      {g.nomClient || "Client de passage"}
+                      {g.nomClient || "—"}
                     </td>
                     <td className="px-3 py-2 text-onyx-500">{g.dateVente ?? "—"}</td>
                     <td className="px-3 py-2 align-top text-onyx-500">
