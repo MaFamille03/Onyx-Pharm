@@ -604,8 +604,6 @@ export function ImportVentesSection() {
     // Les seules valeurs remplacées sont les emplacements explicitement
     // sélectionnés par l'utilisateur dans les erreurs.
     const file = fichierCourant;
-    const brutes = await lireFichierExcel(file);
-
     // La logique complète d'analyse reste dans handleFichier ; ce second
     // passage est déclenché par la sélection via un événement synthétique.
     const dataTransfer = new DataTransfer();
