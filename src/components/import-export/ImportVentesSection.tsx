@@ -338,8 +338,7 @@ export function ImportVentesSection() {
     setAnalyse(true);
 
     try {
-      const brutes = await lireFichierExcel(file);
-      if (brutes.length === 0) {
+        if (brutes.length === 0) {
         setErreurGenerale("Ce fichier ne contient aucune ligne.");
         setAnalyse(false);
         return;
@@ -957,7 +956,7 @@ if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
                                     )
                                   }
                                 >
-                                  <option value="">Choisir l'emplacement existant…</option>
+                                  <option value="">Choisir l&apos;emplacement existant…</option>
                                   {erreurEmplacement.suggestions.map((emplacement) => (
                                     <option key={emplacement.id} value={emplacement.id}>
                                       {emplacement.nom}
@@ -970,7 +969,7 @@ if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
                                   disabled={!correctionsEmplacements[`${g.numero}|${erreurEmplacement.ligneIndex}`] || analyse}
                                   onClick={() => void reanalyserApresCorrection()}
                                 >
-                                  Appliquer l'emplacement et revérifier
+                                  Appliquer l&apos;emplacement et revérifier
                                 </button>
                               </div>
                             ))}
