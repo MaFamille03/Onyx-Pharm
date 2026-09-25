@@ -361,7 +361,16 @@ export function VentesSynthese() {
                 const reste = Math.max(0, total - paye);
                 return (
                   <div key={v.id} className="border-b border-onyx-50 last:border-0">
-                    <button type="button" onClick={() => setVenteOuverteId(ouvert ? null : v.id)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // La FAC de droite reprend désormais l'action des anciennes FAC du bas :
+                        // ouvrir la vente complète. On conserve la liste, les montants et le
+                        // rattachement au client ; seul le comportement au clic change.
+                        window.location.href = `/ventes/ventes?ouvrir=${encodeURIComponent(v.id)}`;
+                      }}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60"
+                    >
                       <div className="flex min-w-0 items-center gap-2">
                         {ouvert ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         <ReceiptText size={15} className="shrink-0 text-onyx-400" />
