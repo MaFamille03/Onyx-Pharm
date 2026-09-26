@@ -11,6 +11,7 @@ const fcfa = (value: number) => `${value.toLocaleString("fr-FR")} FCFA`;
 
 type ClientSynthese = {
   client_id: string;
+  client_ids: string[];
   client_nom: string;
   nombre_ventes: number;
   total_achats: number;
@@ -59,6 +60,8 @@ export function VentesSynthese() {
   const [debut, setDebut] = useState(debutMoisCourant());
   const [fin, setFin] = useState(finAujourdhui());
   const [ventes, setVentes] = useState<VentePeriode[]>([]);
+  const [facsClient, setFacsClient] = useState<VentePeriode[]>([]);
+  const [loadingFacs, setLoadingFacs] = useState(false);
   const [paiements, setPaiements] = useState<PaiementPeriode[]>([]);
   const [clients, setClients] = useState<ClientSynthese[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,8 +143,9 @@ export function VentesSynthese() {
         const cle = nom.toLocaleLowerCase("fr-FR");
         const existant = groupes.get(cle);
         if (!existant) {
-          groupes.set(cle, { ...client, client_nom: nom });
+          groupes.set(cle, { ...client, client_nom: nom, client_ids: client.client_id ? [client.client_id] : [] });
         } else {
+          if (client.client_id && !existant.client_ids.includes(client.client_id)) existant.client_ids.push(client.client_id);
           existant.nombre_ventes += Number(client.nombre_ventes || 0);
           existant.total_achats += Number(client.total_achats || 0);
           existant.total_paye += Number(client.total_paye || 0);
@@ -160,6 +164,51 @@ export function VentesSynthese() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const chargerFacsClient = useCallback(async (client: ClientSynthese) => {
+    setLoadingFacs(true);
+    setVenteOuverteId(null);
+    setFacsClient([]);
+    if (!client.client_ids.length) {
+      setLoadingFacs(false);
+      return;
+    }
+
+    const { data, error: facsError } = await supabase
+      .from("ventes")
+      .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
+      .in("client_id", client.client_ids)
+      .not("statut", "in", "(Annulé,Brouillon)")
+      .order("date_vente", { ascending: false });
+
+    if (facsError) {
+      setError(logSupabaseError({ table: "ventes", operation: "select FAC client" }, facsError, "Impossible de charger les factures de ce client."));
+      setLoadingFacs(false);
+      return;
+    }
+
+    const factures = (data ?? []) as VentePeriode[];
+    const ids = factures.map((v) => v.id);
+    let paiementsClient: PaiementPeriode[] = [];
+    if (ids.length) {
+      const { data: paiementsData } = await supabase
+        .from("paiements_ventes")
+        .select("montant, date_paiement, vente_id")
+        .in("vente_id", ids);
+      paiementsClient = (paiementsData ?? []) as PaiementPeriode[];
+    }
+    const payes = new Map<string, number>();
+    for (const paiement of paiementsClient) {
+      payes.set(paiement.vente_id, (payes.get(paiement.vente_id) ?? 0) + Number(paiement.montant || 0));
+    }
+    setFacsClient(factures.map((vente) => {
+      const total = Number(vente.montant_total || 0);
+      const paye = payes.get(vente.id) ?? 0;
+      const reste = Math.max(0, total - paye);
+      return { ...vente, montant_paye: paye, statut: reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée" };
+    }));
+    setLoadingFacs(false);
+  }, [supabase]);
 
   // La synthèse reste synchronisée avec les paiements et les ventes : une
   // validation de paiement met donc immédiatement à jour le client et ses FAC.
@@ -313,12 +362,12 @@ export function VentesSynthese() {
       </div>
 
       <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.5fr)]">
-        <div className="min-w-0 rounded-xl border border-onyx-100 overflow-hidden">
-          <div className="sticky top-0 z-20 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+        <div className="min-w-0 rounded-xl border border-onyx-100 overflow-hidden flex min-h-0 flex-col">
+          <div className="sticky top-0 z-20 shrink-0 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
             <p className="text-xs text-onyx-400">Cliquez sur un client pour ouvrir sa situation et afficher ses FAC.</p>
           </div>
-          <div className="max-h-[560px] overflow-y-auto divide-y divide-onyx-50">
+          <div className="max-h-[560px] min-h-0 overflow-y-auto divide-y divide-onyx-50 overscroll-contain">
             {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
               const cle = c.client_nom.toLocaleLowerCase("fr-FR");
               const ouvert = clientOuvertNom === cle;
@@ -328,7 +377,7 @@ export function VentesSynthese() {
                   <button type="button" onClick={() => {
                     setClientOuvertNom(ouvert ? null : cle);
                     setClientSelectionneNom(c.client_nom);
-                    setVenteOuverteId(null);
+                    chargerFacsClient(c);
                     window.setTimeout(() => facSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
                   }} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
                     <div className="flex min-w-0 items-center gap-2">
@@ -357,16 +406,14 @@ export function VentesSynthese() {
           </div>
         </div>
 
-        <div ref={facSectionRef} className="min-w-0 scroll-mt-4 rounded-xl border border-onyx-100 overflow-hidden">
-          <div className="sticky top-0 z-20 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+        <div ref={facSectionRef} className="min-w-0 scroll-mt-4 rounded-xl border border-onyx-100 overflow-hidden flex min-h-0 flex-col">
+          <div className="sticky top-0 z-20 shrink-0 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
             <h3 className="text-sm font-semibold text-onyx-800">FAC du client sélectionné</h3>
             <p className="text-xs text-onyx-400">Les factures de toutes les commandes liées au même nom de client sont regroupées ici.</p>
           </div>
-          <div className="max-h-[560px] overflow-y-auto">
-            {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses FAC.</p> : (() => {
-              const nomCle = clientSelectionneNom.toLocaleLowerCase("fr-FR");
-              const facs = ventes.filter((v) => v.clients?.[0]?.nom?.trim().toLocaleLowerCase("fr-FR") === nomCle);
-              if (!facs.length) return <p className="p-6 text-sm text-onyx-400">Aucune FAC sur la période sélectionnée.</p>;
+          <div className="min-h-0">
+            {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses FAC.</p> : loadingFacs ? <p className="p-6 text-sm text-onyx-400">Chargement des factures du client...</p> : !facsClient.length ? <p className="p-6 text-sm text-onyx-400">Aucune facture enregistrée pour ce client.</p> : (() => {
+              const facs = facsClient;
               return facs.map((v) => {
                 const ouvert = venteOuverteId === v.id;
                 const total = Number(v.montant_total) || 0;
@@ -374,7 +421,7 @@ export function VentesSynthese() {
                 const reste = Math.max(0, total - paye);
                 return (
                   <div key={v.id} className="border-b border-onyx-50 last:border-0">
-                    <button type="button" onClick={() => { window.location.href = `/ventes/ventes?ouvrir=${encodeURIComponent(v.id)}`; }} className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
+                    <button type="button" onClick={() => setVenteOuverteId(ouvert ? null : v.id)} className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
                       <div className="flex min-w-0 items-start gap-2">
                         {ouvert ? <ChevronDown size={16} className="mt-0.5 shrink-0" /> : <ChevronRight size={16} className="mt-0.5 shrink-0" />}
                         <ReceiptText size={15} className="mt-0.5 shrink-0 text-onyx-400" />
@@ -405,6 +452,9 @@ export function VentesSynthese() {
                           )}
                         </div>
                         <div className="mt-3 rounded-lg border border-onyx-100 bg-white"><div className="border-b border-onyx-100 px-3 py-2"><p className="text-xs font-semibold text-onyx-700">Paiements enregistrés</p></div>{paiementsCommande.length === 0 ? <p className="px-3 py-3 text-xs text-onyx-400">Aucun paiement enregistré sur cette facture.</p> : <div className="divide-y divide-onyx-50">{paiementsCommande.map((paiement, index) => <div key={`${paiement.date_paiement}-${index}`} className="flex items-center justify-between gap-3 px-3 py-2 text-xs"><span className="text-onyx-500">{new Date(paiement.date_paiement).toLocaleDateString("fr-FR")}</span><span className="shrink-0 font-semibold text-emerald-600">{fcfa(Number(paiement.montant) || 0)}</span></div>)}</div>}</div>
+                        <div className="mt-3 flex justify-end">
+                          <SecondaryButton onClick={() => { window.location.href = `/ventes/ventes?ouvrir=${encodeURIComponent(v.id)}`; }} className="w-full justify-center text-xs sm:w-auto">Ouvrir la vente complète</SecondaryButton>
+                        </div>
                       </div>
                     )}
                   </div>
