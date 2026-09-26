@@ -179,7 +179,16 @@ export function ArticleFormModal({
       0.35
     ).slice(0, 8);
 
-    setSuggestionsArticle(classes);
+    // Lorsque la désignation est déjà suffisamment complète, on ne montre
+    // que les correspondances réellement fortes. Cela permet de saisir un
+    // nouvel article sans laisser des suggestions faibles encombrer le
+    // formulaire. Une correspondance forte (notamment exacte) reste proposée.
+    const rechercheSuffisammentComplete = recherche.length >= 10;
+    const correspondancesAffichees = rechercheSuffisammentComplete
+      ? classes.filter((article) => article.scoreCorrespondance >= 0.75)
+      : classes;
+
+    setSuggestionsArticle(correspondancesAffichees);
     setRechercheArticleEnCours(false);
   }
 
