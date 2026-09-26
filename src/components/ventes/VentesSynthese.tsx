@@ -411,7 +411,7 @@ export function VentesSynthese() {
             <h3 className="text-sm font-semibold text-onyx-800">FACTURE du client sélectionné</h3>
             <p className="text-xs text-onyx-400">Les factures de toutes les commandes liées au même nom de client sont regroupées ici.</p>
           </div>
-          <div className="min-h-0">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses factures.</p> : loadingFacs ? <p className="p-6 text-sm text-onyx-400">Chargement des factures du client...</p> : !facsClient.length ? <p className="p-6 text-sm text-onyx-400">Aucune facture enregistrée pour ce client.</p> : (() => {
               const facs = facsClient;
               return facs.map((v) => {
