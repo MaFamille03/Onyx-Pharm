@@ -31,21 +31,29 @@ type LigneCaisse = {
   depense: number;
 };
 
+function formatDateLocale(date: Date): string {
+  const annee = date.getFullYear();
+  const mois = String(date.getMonth() + 1).padStart(2, "0");
+  const jour = String(date.getDate()).padStart(2, "0");
+  return `${annee}-${mois}-${jour}`;
+}
+
 function debutPeriode(periode: Periode): string | null {
   const now = new Date();
   if (periode === "aujourdhui") {
-    return new Date(now.setHours(0, 0, 0, 0)).toISOString().slice(0, 10);
+    const debut = new Date(now);
+    debut.setHours(0, 0, 0, 0);
+    return formatDateLocale(debut);
   }
   if (periode === "semaine") {
     const jour = now.getDay() || 7;
     const lundi = new Date(now);
+    lundi.setHours(0, 0, 0, 0);
     lundi.setDate(now.getDate() - jour + 1);
-    return lundi.toISOString().slice(0, 10);
+    return formatDateLocale(lundi);
   }
   if (periode === "mois") {
-    return new Date(now.getFullYear(), now.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10);
+    return formatDateLocale(new Date(now.getFullYear(), now.getMonth(), 1));
   }
   return null;
 }
@@ -61,8 +69,9 @@ export function SoldeManager() {
   const [lignes, setLignes] = useState<LigneCaisse[]>([]);
   const [loading, setLoading] = useState(true);
   const [periode, setPeriode] = useState<Periode>("tout");
-  const [moisChoisi, setMoisChoisi] = useState(new Date().getMonth());
-  const [anneeChoisie, setAnneeChoisie] = useState(new Date().getFullYear());
+  const [moisChoisi, setMoisChoisi] = useState<number | null>(new Date().getMonth());
+  const [anneeChoisie, setAnneeChoisie] = useState<number | null>(new Date().getFullYear());
+  const [soldeDebutCalcule, setSoldeDebutCalcule] = useState(0);
 
   const [modalSoldeOpen, setModalSoldeOpen] = useState(false);
   const [nouveauSolde, setNouveauSolde] = useState("");
@@ -80,7 +89,11 @@ export function SoldeManager() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const debut = debutPeriode(periode);
+
+    const debutPeriodeSelectionnee =
+      periode === "mois_choisi" && anneeChoisie !== null && moisChoisi !== null
+        ? formatDateLocale(new Date(anneeChoisie, moisChoisi, 1))
+        : debutPeriode(periode);
 
     let encQuery = supabase
       .from("encaissements")
@@ -88,14 +101,28 @@ export function SoldeManager() {
     let decQuery = supabase
       .from("decaissements")
       .select("id, reference, date_operation, montant, description, categorie");
+
     if (periode === "mois_choisi") {
-      const debutMois = new Date(anneeChoisie, moisChoisi, 1).toISOString().slice(0, 10);
-      const finMois = new Date(anneeChoisie, moisChoisi + 1, 1).toISOString().slice(0, 10);
-      encQuery = encQuery.gte("date_operation", debutMois).lt("date_operation", finMois);
-      decQuery = decQuery.gte("date_operation", debutMois).lt("date_operation", finMois);
-    } else if (debut) {
-      encQuery = encQuery.gte("date_operation", debut);
-      decQuery = decQuery.gte("date_operation", debut);
+      // Mois et année sont indépendants :
+      // - mois + année => mois précis
+      // - année seule => toute l'année
+      // - mois seul => tous les mois correspondants, quelle que soit l'année
+      if (anneeChoisie !== null && moisChoisi !== null) {
+        const debutMois = formatDateLocale(new Date(anneeChoisie, moisChoisi, 1));
+        const finMois = formatDateLocale(new Date(anneeChoisie, moisChoisi + 1, 1));
+        encQuery = encQuery.gte("date_operation", debutMois).lt("date_operation", finMois);
+        decQuery = decQuery.gte("date_operation", debutMois).lt("date_operation", finMois);
+      } else if (anneeChoisie !== null) {
+        const debutAnnee = formatDateLocale(new Date(anneeChoisie, 0, 1));
+        const finAnnee = formatDateLocale(new Date(anneeChoisie + 1, 0, 1));
+        encQuery = encQuery.gte("date_operation", debutAnnee).lt("date_operation", finAnnee);
+        decQuery = decQuery.gte("date_operation", debutAnnee).lt("date_operation", finAnnee);
+      }
+      // Pour un mois seul, aucune contrainte SQL sur la date : le filtre
+      // du mois est appliqué après récupération des opérations.
+    } else if (debutPeriodeSelectionnee) {
+      encQuery = encQuery.gte("date_operation", debutPeriodeSelectionnee);
+      decQuery = decQuery.gte("date_operation", debutPeriodeSelectionnee);
     }
 
     const [encRes, decRes, paramRes] = await Promise.all([
@@ -108,13 +135,16 @@ export function SoldeManager() {
         .maybeSingle(),
     ]);
 
+    const soldeInitialCourant = Number(paramRes.data?.valeur) || 0;
+    setSoldeInitial(soldeInitialCourant);
+
     const enc = (encRes.data ?? []).map((e) => ({
       id: e.id,
       reference: e.reference,
       date_operation: e.date_operation,
       description: e.description,
       categorie: e.categorie,
-      recette: e.montant,
+      recette: Number(e.montant) || 0,
       depense: 0,
     }));
     const dec = (decRes.data ?? []).map((d) => ({
@@ -124,11 +154,17 @@ export function SoldeManager() {
       description: d.description,
       categorie: d.categorie,
       recette: 0,
-      depense: d.montant,
+      depense: Number(d.montant) || 0,
     }));
 
+    const operations = [...enc, ...dec];
+    const operationsFiltrees =
+      periode === "mois_choisi" && moisChoisi !== null && anneeChoisie === null
+        ? operations.filter((operation) => new Date(operation.date_operation).getMonth() === moisChoisi)
+        : operations;
+
     setLignes(
-      [...enc, ...dec].sort((a, b) =>
+      operationsFiltrees.sort((a, b) =>
         a.date_operation < b.date_operation
           ? -1
           : a.date_operation > b.date_operation
@@ -136,9 +172,36 @@ export function SoldeManager() {
             : a.reference.localeCompare(b.reference)
       )
     );
-    if (paramRes.data?.valeur) setSoldeInitial(Number(paramRes.data.valeur) || 0);
+
+    // Pour une période continue, on reconstitue le solde au début de la période
+    // à partir du solde initial et de toutes les opérations antérieures.
+    // Pour "mois seul", plusieurs années sont regroupées : il n'existe donc
+    // pas de solde de début unique.
+    if (periode === "tout" || periode === "mois_choisi" && anneeChoisie === null) {
+      setSoldeDebutCalcule(periode === "tout" ? soldeInitialCourant : 0);
+    } else if (debutPeriodeSelectionnee) {
+      const [encAvantRes, decAvantRes] = await Promise.all([
+        supabase.from("encaissements").select("montant").lt("date_operation", debutPeriodeSelectionnee),
+        supabase.from("decaissements").select("montant").lt("date_operation", debutPeriodeSelectionnee),
+      ]);
+
+      if (!encAvantRes.error && !decAvantRes.error) {
+        const encAvant = (encAvantRes.data ?? []).reduce(
+          (total, row) => total + (Number(row.montant) || 0),
+          0
+        );
+        const decAvant = (decAvantRes.data ?? []).reduce(
+          (total, row) => total + (Number(row.montant) || 0),
+          0
+        );
+        setSoldeDebutCalcule(soldeInitialCourant + encAvant - decAvant);
+      } else {
+        // En cas d'échec de la lecture historique, on conserve une base sûre.
+        setSoldeDebutCalcule(soldeInitialCourant);
+      }
+    }
+
     setLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periode, moisChoisi, anneeChoisie]);
 
   useEffect(() => {
@@ -242,8 +305,19 @@ export function SoldeManager() {
   }
 
   async function exporter() {
-    let cumul = periode === "tout" ? soldeInitial : 0;
+    const totalEncaissements = lignes.reduce((s, l) => s + l.recette, 0);
+    const totalDecaissements = lignes.reduce((s, l) => s + l.depense, 0);
+    const variationPeriode = totalEncaissements - totalDecaissements;
+    const periodeContinue =
+      periode === "tout" ||
+      periode === "aujourdhui" ||
+      periode === "semaine" ||
+      periode === "mois" ||
+      (periode === "mois_choisi" && anneeChoisie !== null);
+    const colonneSolde = periodeContinue ? "Solde cumulatif" : "Variation cumulée";
+    let cumul = periodeContinue ? soldeDebutCalcule : 0;
     const rows: Record<string, unknown>[] = [];
+
     if (periode === "tout") {
       rows.push({
         Numéro: "",
@@ -251,9 +325,19 @@ export function SoldeManager() {
         Désignation: "Solde initial",
         Recette: "",
         Dépense: "",
-        "Solde cumulatif": soldeInitial,
+        [colonneSolde]: soldeInitial,
+      });
+    } else if (periodeContinue) {
+      rows.push({
+        Numéro: "",
+        Date: "",
+        Désignation: "Solde début de période",
+        Recette: "",
+        Dépense: "",
+        [colonneSolde]: soldeDebutCalcule,
       });
     }
+
     rows.push(
       ...lignes.map((l, i) => {
         cumul += l.recette - l.depense;
@@ -263,38 +347,42 @@ export function SoldeManager() {
           Désignation: l.description || l.reference,
           Recette: l.recette || "",
           Dépense: l.depense || "",
-          "Solde cumulatif": cumul,
+          [colonneSolde]: cumul,
         };
       })
     );
-    const totalRecettes = lignes.reduce((s, l) => s + l.recette, 0);
-    const totalDepenses = lignes.reduce((s, l) => s + l.depense, 0);
+
     rows.push({
       Numéro: "" as unknown as number,
       Date: "",
       Désignation: "TOTAL",
-      Recette: totalRecettes,
-      Dépense: totalDepenses,
-      "Solde cumulatif": cumul,
+      Recette: totalEncaissements,
+      Dépense: totalDecaissements,
+      [colonneSolde]: periodeContinue ? soldeDebutCalcule + variationPeriode : variationPeriode,
     });
+
     await exporterExcelMisEnForme(
       "Livre_De_Caisse_Onyx_Pharm",
       "Livre de caisse",
-      ["Numéro", "Date", "Désignation", "Recette", "Dépense", "Solde cumulatif"],
+      ["Numéro", "Date", "Désignation", "Recette", "Dépense", colonneSolde],
       rows
     );
   }
 
   const totalEncaissements = lignes.reduce((s, l) => s + l.recette, 0);
   const totalDecaissements = lignes.reduce((s, l) => s + l.depense, 0);
-  const soldeActuel =
-    periode === "tout"
-      ? soldeInitial + totalEncaissements - totalDecaissements
-      : totalEncaissements - totalDecaissements;
+  const variationPeriode = totalEncaissements - totalDecaissements;
+  const periodeContinue =
+    periode === "tout" ||
+    periode === "aujourdhui" ||
+    periode === "semaine" ||
+    periode === "mois" ||
+    (periode === "mois_choisi" && anneeChoisie !== null);
+  const soldeFin = soldeDebutCalcule + variationPeriode;
+  const afficheSoldeReel = periodeContinue;
 
-  let cumulAffiche = periode === "tout" ? soldeInitial : 0;
-
-  let cumulAfficheMobile = periode === "tout" ? soldeInitial : 0;
+  let cumulAffiche = afficheSoldeReel ? soldeDebutCalcule : 0;
+  let cumulAfficheMobile = afficheSoldeReel ? soldeDebutCalcule : 0;
 
   return (
     <div>
@@ -363,10 +451,11 @@ export function SoldeManager() {
       {periode === "mois_choisi" && (
         <div className="mt-3 grid grid-cols-2 gap-2 sm:flex">
           <select
-            value={moisChoisi}
-            onChange={(e) => setMoisChoisi(Number(e.target.value))}
+            value={moisChoisi ?? ""}
+            onChange={(e) => setMoisChoisi(e.target.value === "" ? null : Number(e.target.value))}
             className="rounded-lg border border-onyx-200 bg-white px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
           >
+            <option value="">Tous les mois</option>
             {NOMS_MOIS.map((nom, i) => (
               <option key={i} value={i}>
                 {nom}
@@ -374,10 +463,11 @@ export function SoldeManager() {
             ))}
           </select>
           <select
-            value={anneeChoisie}
-            onChange={(e) => setAnneeChoisie(Number(e.target.value))}
+            value={anneeChoisie ?? ""}
+            onChange={(e) => setAnneeChoisie(e.target.value === "" ? null : Number(e.target.value))}
             className="rounded-lg border border-onyx-200 bg-white px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
           >
+            <option value="">Toutes les années</option>
             {Array.from({ length: 8 }).map((_, i) => {
               const annee = new Date().getFullYear() - 5 + i;
               return (
@@ -422,14 +512,30 @@ export function SoldeManager() {
                 <Wallet size={18} />
               </div>
               <p className="mt-3 text-xl font-semibold text-white">
-                {soldeActuel.toLocaleString("fr-FR")}
+                {(afficheSoldeReel ? soldeFin : variationPeriode).toLocaleString("fr-FR")}
               </p>
               <p className="text-xs text-onyx-300">
-                {periode === "tout" ? "Solde actuel" : "Variation sur la période"}{" "}
-                (FCFA)
+                {afficheSoldeReel ? "Solde fin de période" : "Variation cumulée"} (FCFA)
               </p>
             </div>
           </div>
+
+          {afficheSoldeReel && (
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-onyx-100 bg-white p-4">
+                <p className="text-xs text-onyx-400">Solde début de période</p>
+                <p className="mt-1 text-lg font-semibold text-onyx-800">
+                  {soldeDebutCalcule.toLocaleString("fr-FR")} FCFA
+                </p>
+              </div>
+              <div className="rounded-xl border border-onyx-100 bg-white p-4">
+                <p className="text-xs text-onyx-400">Variation de la période</p>
+                <p className={`mt-1 text-lg font-semibold ${variationPeriode >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                  {variationPeriode.toLocaleString("fr-FR")} FCFA
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="mt-5 hidden overflow-hidden rounded-xl border border-onyx-100 bg-white md:block">
             <div className="overflow-x-auto">
@@ -441,7 +547,7 @@ export function SoldeManager() {
                   <th className="px-4 py-3">Désignation</th>
                   <th className="px-4 py-3 text-right">Recette</th>
                   <th className="px-4 py-3 text-right">Dépense</th>
-                  <th className="px-4 py-3 text-right">Solde cumulatif</th>
+                  <th className="px-4 py-3 text-right">{afficheSoldeReel ? "Solde cumulatif" : "Variation cumulée"}</th>
                 </tr>
               </thead>
               <tbody>
