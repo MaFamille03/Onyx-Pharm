@@ -64,6 +64,7 @@ export function VentesSynthese() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clientSelectionneNom, setClientSelectionneNom] = useState<string | null>(null);
+  const [clientOuvertNom, setClientOuvertNom] = useState<string | null>(null);
   const facSectionRef = useRef<HTMLDivElement | null>(null);
   const [venteOuverteId, setVenteOuverteId] = useState<string | null>(null);
   const [lignesCommande, setLignesCommande] = useState<LigneCommande[]>([]);
@@ -312,47 +313,56 @@ export function VentesSynthese() {
       </div>
 
       <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.5fr)]">
-        <div className="min-w-0 rounded-xl border border-onyx-100">
-          <div className="border-b border-onyx-100 px-4 py-3">
+        <div className="min-w-0 rounded-xl border border-onyx-100 overflow-hidden">
+          <div className="sticky top-0 z-20 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
-            <p className="text-xs text-onyx-400">Un nom = une situation cumulée, toutes ses commandes confondues. Cliquez sur un client pour afficher ses FAC.</p>
+            <p className="text-xs text-onyx-400">Cliquez sur un client pour ouvrir sa situation et afficher ses FAC.</p>
           </div>
-          <div className="divide-y divide-onyx-50">
+          <div className="max-h-[560px] overflow-y-auto divide-y divide-onyx-50">
             {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
-              const selectionne = clientSelectionneNom?.toLocaleLowerCase("fr-FR") === c.client_nom.toLocaleLowerCase("fr-FR");
+              const cle = c.client_nom.toLocaleLowerCase("fr-FR");
+              const ouvert = clientOuvertNom === cle;
+              const selectionne = clientSelectionneNom?.toLocaleLowerCase("fr-FR") === cle;
               return (
-                <button key={c.client_nom.toLocaleLowerCase("fr-FR")} type="button" onClick={() => {
-                  setClientSelectionneNom(c.client_nom);
-                  setVenteOuverteId(null);
-                  window.setTimeout(() => facSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-                }} className={`block w-full px-4 py-3 text-left transition ${selectionne ? "bg-onyx-50 ring-1 ring-inset ring-onyx-200" : "hover:bg-onyx-50/60"}`}>
-                  <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-onyx-800">{c.client_nom}</p>
-                      <p className="mt-1 text-xs text-onyx-400">{c.nombre_ventes} commande{c.nombre_ventes > 1 ? "s" : ""} · dernier achat {c.derniere_vente ? new Date(c.derniere_vente).toLocaleDateString("fr-FR") : "—"}</p>
+                <div key={cle} className={selectionne ? "bg-onyx-50/70" : "bg-white"}>
+                  <button type="button" onClick={() => {
+                    setClientOuvertNom(ouvert ? null : cle);
+                    setClientSelectionneNom(c.client_nom);
+                    setVenteOuverteId(null);
+                    window.setTimeout(() => facSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                  }} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {ouvert ? <ChevronDown size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0" />}
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-onyx-800">{c.client_nom}</p>
+                        <p className="mt-0.5 text-xs text-onyx-400">{c.nombre_ventes} commande{c.nombre_ventes > 1 ? "s" : ""} · dernier achat {c.derniere_vente ? new Date(c.derniere_vente).toLocaleDateString("fr-FR") : "—"}</p>
+                      </div>
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-xs text-onyx-400">Dû</p>
                       <p className={`text-sm font-bold ${c.total_du > 0 ? "text-red-600" : "text-emerald-600"}`}>{fcfa(Math.max(0, c.total_du))}</p>
                     </div>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                    <div><p className="text-onyx-400">Achats</p><p className="font-semibold text-onyx-700">{fcfa(c.total_achats)}</p></div>
-                    <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(c.total_paye)}</p></div>
-                    <div><p className="text-onyx-400">Situation</p><p className="font-semibold text-onyx-700">{c.total_du > 0 ? "À régler" : "Soldée"}</p></div>
-                  </div>
-                </button>
+                  </button>
+                  {ouvert && (
+                    <div className="grid grid-cols-2 gap-3 bg-onyx-50/60 px-4 pb-4 pt-1 text-xs sm:grid-cols-4 sm:px-10">
+                      <div><p className="text-onyx-400">Achats</p><p className="font-semibold text-onyx-700">{fcfa(c.total_achats)}</p></div>
+                      <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(c.total_paye)}</p></div>
+                      <div><p className="text-onyx-400">Dû</p><p className={`font-semibold ${c.total_du > 0 ? "text-red-600" : "text-onyx-500"}`}>{fcfa(Math.max(0, c.total_du))}</p></div>
+                      <div><p className="text-onyx-400">Dernier achat</p><p className="font-semibold text-onyx-700">{c.derniere_vente ? new Date(c.derniere_vente).toLocaleDateString("fr-FR") : "—"}</p></div>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
         </div>
 
-        <div ref={facSectionRef} className="min-w-0 scroll-mt-4 rounded-xl border border-onyx-100">
-          <div className="border-b border-onyx-100 px-4 py-3">
+        <div ref={facSectionRef} className="min-w-0 scroll-mt-4 rounded-xl border border-onyx-100 overflow-hidden">
+          <div className="sticky top-0 z-20 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
             <h3 className="text-sm font-semibold text-onyx-800">FAC du client sélectionné</h3>
             <p className="text-xs text-onyx-400">Les factures de toutes les commandes liées au même nom de client sont regroupées ici.</p>
           </div>
-          <div>
+          <div className="max-h-[560px] overflow-y-auto">
             {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses FAC.</p> : (() => {
               const nomCle = clientSelectionneNom.toLocaleLowerCase("fr-FR");
               const facs = ventes.filter((v) => v.clients?.[0]?.nom?.trim().toLocaleLowerCase("fr-FR") === nomCle);
@@ -364,7 +374,7 @@ export function VentesSynthese() {
                 const reste = Math.max(0, total - paye);
                 return (
                   <div key={v.id} className="border-b border-onyx-50 last:border-0">
-                    <button type="button" onClick={() => setVenteOuverteId(ouvert ? null : v.id)} className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
+                    <button type="button" onClick={() => { window.location.href = `/ventes/ventes?ouvrir=${encodeURIComponent(v.id)}`; }} className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
                       <div className="flex min-w-0 items-start gap-2">
                         {ouvert ? <ChevronDown size={16} className="mt-0.5 shrink-0" /> : <ChevronRight size={16} className="mt-0.5 shrink-0" />}
                         <ReceiptText size={15} className="mt-0.5 shrink-0 text-onyx-400" />
