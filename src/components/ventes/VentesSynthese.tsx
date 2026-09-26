@@ -302,7 +302,7 @@ export function VentesSynthese() {
   }
 
   return (
-    <section className="mt-5 flex h-[calc(100vh-7rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-onyx-100 bg-white shadow-sm">
+    <section className="mt-5 flex h-[calc(100vh-5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-onyx-100 bg-white shadow-sm">
       {/* Zone haute fixe : titre + indicateurs + période analysée */}
       <div className="shrink-0 rounded-t-2xl border-b border-onyx-100 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3">
