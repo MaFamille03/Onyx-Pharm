@@ -22,7 +22,7 @@ import { InlineBanner } from "@/components/ui/Badges";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 
 const COLONNES_MODELE = [
-  "N° de vente (regroupement)",
+  "N° de BL",
   "Date de vente",
   "Client",
   "Article",
@@ -242,6 +242,7 @@ export function ImportVentesSection() {
   const [resultat, setResultat] = useState<string | null>(null);
   const [resultatErreur, setResultatErreur] = useState(false);
   const [modeHistorique, setModeHistorique] = useState(false);
+  const [fichierCourant, setFichierCourant] = useState<File | null>(null);
   const [clientOuverts, setClientOuverts] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -287,7 +288,7 @@ export function ImportVentesSection() {
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
       {
-        "N° de vente (regroupement)": "V1",
+        "N° de BL": "BL001",
         "Date de vente": "2026-09-01",
         Client: "Client Exemple",
         Article: "Paracétamol 500 mg",
@@ -301,7 +302,7 @@ export function ImportVentesSection() {
         Observation: "",
       },
       {
-        "N° de vente (regroupement)": "V1",
+        "N° de BL": "BL001",
         "Date de vente": "2026-09-01",
         Client: "Client Exemple",
         Article: "Compresses stériles",
@@ -312,10 +313,10 @@ export function ImportVentesSection() {
         Reste: "",
         Statut: "",
         "Mode de paiement": "",
-        Observation: "Les colonnes de paiement sont renseignées uniquement sur la première ligne de la vente.",
+        Observation: "Avance et reste peuvent être renseignés ligne par ligne ; les avances sont additionnées pour le BL.",
       },
       {
-        "N° de vente (regroupement)": "V2",
+        "N° de BL": "BL002",
         "Date de vente": "2025-03-15",
         Client: "Ancien Client",
         Article: "Gants stériles",
@@ -333,6 +334,16 @@ export function ImportVentesSection() {
 
   function cleLigne(numero: string, ligneIndex: number) {
     return `${numero}|${ligneIndex}`;
+  }
+
+  function getStockParArticle(articleId: string): StockDisponible[] {
+    return emplacements.map((emplacement) => ({
+      id: emplacement.id,
+      nom: emplacement.nom,
+      quantite: stocks
+        .filter((stock) => stock.article_id === articleId && stock.emplacement_id === emplacement.id)
+        .reduce((total, stock) => total + Number(stock.quantite || 0), 0),
+    }));
   }
 
   async function chargerDonneesReference() {
@@ -365,13 +376,13 @@ export function ImportVentesSection() {
 
       const parGroupe = new Map<string, LigneBrute[]>();
       for (const ligne of brutes) {
-        const cle = String(ligne["N° de vente (regroupement)"] ?? "").trim();
+        const cle = String(ligne["N° de BL"] ?? "").trim();
         if (!cle) continue;
         if (!parGroupe.has(cle)) parGroupe.set(cle, []);
         parGroupe.get(cle)!.push(ligne);
       }
       if (parGroupe.size === 0) {
-        setErreurGenerale("Aucune ligne valide : la colonne \"N° de vente (regroupement)\" doit être renseignée.");
+        setErreurGenerale("Aucune ligne valide : la colonne \"N° de BL\" doit être renseignée.");
         setGroupes([]);
         return;
       }
@@ -561,6 +572,7 @@ export function ImportVentesSection() {
     setResultat(null);
     setGroupes([]);
     setCorrections({});
+    setFichierCourant(file);
     setAnalyse(true);
     try {
       const brutes = await lireFichierExcel(file);
@@ -634,7 +646,7 @@ export function ImportVentesSection() {
 
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
       if (refError || !refData) {
-        erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
+        erreursDetail.push(`BL ${groupe.numero} : impossible de générer une référence.`);
         echouees += 1;
         continue;
       }
@@ -653,7 +665,7 @@ export function ImportVentesSection() {
         .single();
 
       if (venteError || !vente) {
-        erreursDetail.push(logSupabaseError({ table: "ventes", operation: "insert (import Excel)" }, venteError, `Vente ${groupe.numero} : impossible de la créer.`));
+        erreursDetail.push(logSupabaseError({ table: "ventes", operation: "insert (import Excel)" }, venteError, `BL ${groupe.numero} : impossible de la créer.`));
         echouees += 1;
         continue;
       }
@@ -672,7 +684,7 @@ export function ImportVentesSection() {
       );
 
       if (lignesError) {
-        erreursDetail.push(`Vente ${groupe.numero} : lignes non enregistrées.`);
+        erreursDetail.push(`BL ${groupe.numero} : lignes non enregistrées.`);
         echouees += 1;
         continue;
       }
@@ -686,7 +698,7 @@ export function ImportVentesSection() {
       if (modeHistorique) {
         const { error: majStatutError } = await supabase.from("ventes").update({ statut: "Validé" }).eq("id", vente.id);
         if (majStatutError) {
-          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée.`);
+          erreursDetail.push(`BL ${groupe.numero} créée en brouillon, mais non validée.`);
           enBrouillon += 1;
           continue;
         }
@@ -703,31 +715,51 @@ export function ImportVentesSection() {
           p_utilisateur_id: user?.id ?? null,
         });
         if (validationError) {
-          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée : ${validationError.message}`);
+          erreursDetail.push(`BL ${groupe.numero} créée en brouillon, mais non validée : ${validationError.message}`);
           enBrouillon += 1;
           continue;
         }
       }
 
-      const premiere = groupe.lignesBrutes[0];
-      const avanceBrut = premiere["Avance"];
-      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === "" ? 0 : Number(avanceBrut);
-      const resteBrut = premiere["Reste"];
-      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === "" ? null : Number(resteBrut);
-      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
-        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
-      } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
-        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
+      // Le paiement est saisi ligne par ligne dans Excel, mais enregistré comme
+      // un paiement global de la vente dans la base. On additionne donc les
+      // avances de toutes les lignes du même BL. Cela permet par exemple :
+      // article A = 7 000 d'avance sur 10 000 + article B = 0 d'avance.
+      const avancesLignes = groupe.lignesBrutes.map((ligne, index) => {
+        const brut = ligne["Avance"];
+        const valeur = brut === undefined || brut === null || String(brut).trim() === "" ? 0 : Number(brut);
+        const ligneMontant = groupe.verifications[index] ? groupe.verifications[index].quantite * groupe.verifications[index].prix : 0;
+        return { ligne, index, brut, valeur, ligneMontant };
+      });
+      let avanceTotale = 0;
+      for (const item of avancesLignes) {
+        if (!Number.isFinite(item.valeur) || item.valeur < 0 || item.valeur > item.ligneMontant) {
+          erreursDetail.push(`BL ${groupe.numero} : avance invalide à la ligne ${item.index + 1} (${String(item.brut)}).`);
+          continue;
+        }
+        avanceTotale += item.valeur;
+        const resteBrut = item.ligne["Reste"];
+        if (resteBrut !== undefined && resteBrut !== null && String(resteBrut).trim() !== "") {
+          const resteExcel = Number(resteBrut);
+          const resteAttendu = Math.max(0, item.ligneMontant - item.valeur);
+          if (!Number.isFinite(resteExcel) || resteExcel < 0 || Math.abs(resteExcel - resteAttendu) > 0.01) {
+            erreursDetail.push(`BL ${groupe.numero} : reste invalide à la ligne ${item.index + 1} (${String(resteBrut)}), attendu ${resteAttendu}.`);
+          }
+        }
       }
-      if (avance > 0) {
+      if (avanceTotale > groupe.montantTotal) {
+        erreursDetail.push(`BL ${groupe.numero} : le total des avances (${avanceTotale}) dépasse le montant total (${groupe.montantTotal}).`);
+      }
+      const lignePaiement = avancesLignes.find((item) => item.valeur > 0)?.ligne ?? groupe.lignesBrutes[0];
+      if (avanceTotale > 0) {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
-          montant: avance,
-          mode_paiement: String(premiere["Mode de paiement"] ?? "").trim() || "Espèces",
+          montant: avanceTotale,
+          mode_paiement: String(lignePaiement?.["Mode de paiement"] ?? "").trim() || "Espèces",
           date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
-        if (paiementError) erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+        if (paiementError) erreursDetail.push(`BL ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
       }
       reussies += 1;
     }
@@ -858,7 +890,7 @@ export function ImportVentesSection() {
           <div className="mt-3 grid gap-3 border-t border-onyx-100 pt-3 lg:grid-cols-2">
             <div>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-onyx-400">
-                <Pencil size={11} /> Modifier / confirmer l&apos;article
+                <Pencil size={11} /> Modifier / confirmer l'article
               </div>
               <input
                 value={corrections[key]?.articleDesignation ?? verification.articleSaisi}
@@ -893,7 +925,7 @@ export function ImportVentesSection() {
                 <MapPin size={11} /> Stock disponible par emplacement
               </div>
               {!verification.article ? (
-                <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d&apos;abord l&apos;article correspondant pour afficher son stock par emplacement.</p>
+                <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d'abord l'article correspondant pour afficher son stock par emplacement.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {verification.stocksParEmplacement.map((stock) => {
@@ -928,7 +960,7 @@ export function ImportVentesSection() {
               )}
               {verification.article && (
                 <p className={`mt-2 text-[10px] ${hasStockAlternatives ? "text-emerald-600" : "text-red-500"}`}>
-                  Stock total de l&apos;article : {stockTotal}. {hasStockAlternatives ? "Un ou plusieurs emplacements permettent cette vente." : "Aucun emplacement ne dispose de la quantité demandée."}
+                  Stock total de l'article : {stockTotal}. {hasStockAlternatives ? "Un ou plusieurs emplacements permettent cette vente." : "Aucun emplacement ne dispose de la quantité demandée."}
                 </p>
               )}
             </div>
@@ -948,7 +980,7 @@ export function ImportVentesSection() {
     <div className="rounded-xl border border-onyx-100 bg-white p-5">
       <h2 className="text-sm font-semibold text-onyx-800">Importer des ventes</h2>
       <p className="mt-1 text-sm text-onyx-500">
-        Importez vos ventes Excel. La vérification reconnaît les désignations proches, contrôle le stock par emplacement et vous laisse corriger chaque ligne avant l&apos;import.
+        Importez vos ventes Excel. La vérification reconnaît les désignations proches, contrôle le stock par emplacement et vous laisse corriger chaque ligne avant l'import.
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1019,7 +1051,7 @@ export function ImportVentesSection() {
                         <div key={groupe.numero} className="p-3 md:p-4">
                           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                             <div>
-                              <span className="text-sm font-semibold text-onyx-800">Vente {groupe.numero}</span>
+                              <span className="text-sm font-semibold text-onyx-800">BL {groupe.numero}</span>
                               <span className="ml-2 text-xs text-onyx-400">{groupe.dateVente ?? "Date non renseignée"}</span>
                             </div>
                             {groupe.valide ? (
