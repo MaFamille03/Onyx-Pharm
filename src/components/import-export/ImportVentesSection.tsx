@@ -22,7 +22,7 @@ import { InlineBanner } from "@/components/ui/Badges";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 
 const COLONNES_MODELE = [
-  "N° de BL",
+  "N° de vente (regroupement)",
   "Date de vente",
   "Client",
   "Article",
@@ -63,12 +63,11 @@ type CorrespondanceArticle = {
 };
 
 type LigneResolue = {
-  article_id: string | null;
+  article_id: string;
   designation: string;
-  emplacement_id: string | null;
+  emplacement_id: string;
   quantite: number;
   prix: number;
-  hors_catalogue?: boolean;
 };
 
 type VerificationLigne = {
@@ -88,7 +87,6 @@ type VerificationLigne = {
   prix: number;
   erreur: string | null;
   besoinCorrection: boolean;
-  horsCatalogue: boolean;
 };
 
 type GroupeVente = {
@@ -109,7 +107,6 @@ type CorrectionsLigne = {
   articleDesignation?: string;
   quantite?: number;
   emplacementId?: string;
-  horsCatalogue?: boolean;
 };
 
 function distanceLevenshtein(a: string, b: string): number {
@@ -231,7 +228,6 @@ export function ImportVentesSection() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const correctionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [clients, setClients] = useState<{ id: string; nom: string }[]>([]);
   const [articles, setArticles] = useState<ArticleImport[]>([]);
@@ -291,7 +287,7 @@ export function ImportVentesSection() {
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
       {
-        "N° de BL": "BL001",
+        "N° de vente (regroupement)": "V1",
         "Date de vente": "2026-09-01",
         Client: "Client Exemple",
         Article: "Paracétamol 500 mg",
@@ -305,7 +301,7 @@ export function ImportVentesSection() {
         Observation: "",
       },
       {
-        "N° de BL": "BL001",
+        "N° de vente (regroupement)": "V1",
         "Date de vente": "2026-09-01",
         Client: "Client Exemple",
         Article: "Compresses stériles",
@@ -316,10 +312,10 @@ export function ImportVentesSection() {
         Reste: "",
         Statut: "",
         "Mode de paiement": "",
-        Observation: "Avance et reste peuvent être renseignés ligne par ligne ; les avances sont additionnées pour le BL.",
+        Observation: "Les colonnes de paiement sont renseignées uniquement sur la première ligne de la vente.",
       },
       {
-        "N° de BL": "BL002",
+        "N° de vente (regroupement)": "V2",
         "Date de vente": "2025-03-15",
         Client: "Ancien Client",
         Article: "Gants stériles",
@@ -359,6 +355,8 @@ export function ImportVentesSection() {
     setErreurGenerale(null);
     try {
       const refs = articles.length > 0 ? { articles, stocks } : await chargerDonneesReference();
+      if (refs.articles.length === 0) throw new Error("Aucun article n'est enregistré dans le stock/catalogue.");
+
       const stockParCle = new Map<string, number>();
       for (const stock of refs.stocks) {
         const cle = `${stock.article_id}|${stock.emplacement_id}`;
@@ -367,13 +365,13 @@ export function ImportVentesSection() {
 
       const parGroupe = new Map<string, LigneBrute[]>();
       for (const ligne of brutes) {
-        const cle = String(ligne["N° de BL"] ?? "").trim();
+        const cle = String(ligne["N° de vente (regroupement)"] ?? "").trim();
         if (!cle) continue;
         if (!parGroupe.has(cle)) parGroupe.set(cle, []);
         parGroupe.get(cle)!.push(ligne);
       }
       if (parGroupe.size === 0) {
-        setErreurGenerale("Aucune ligne valide : la colonne \"N° de BL\" doit être renseignée.");
+        setErreurGenerale("Aucune ligne valide : la colonne \"N° de vente (regroupement)\" doit être renseignée.");
         setGroupes([]);
         return;
       }
@@ -413,9 +411,8 @@ export function ImportVentesSection() {
                 : null, suggestions: [] }
             : trouverArticle(designationRecherchee, refs.articles);
 
-          const horsCatalogue = correction.horsCatalogue === true;
-          const article = horsCatalogue ? null : rechercheArticle.correspondance?.article ?? null;
-          const articleType = horsCatalogue ? null : rechercheArticle.correspondance?.type ?? null;
+          const article = rechercheArticle.correspondance?.article ?? null;
+          const articleType = rechercheArticle.correspondance?.type ?? null;
           const stocksArticle = article
             ? emplacements.map((emplacement) => ({
                 id: emplacement.id,
@@ -429,16 +426,7 @@ export function ImportVentesSection() {
           let disponible = 0;
           let erreur: string | null = null;
 
-          if (horsCatalogue) {
-            emplacementId = null;
-            emplacementNom = null;
-            disponible = 0;
-            if (!articleSaisi) {
-              erreur = "Désignation de l'article hors catalogue manquante.";
-            } else if (!Number.isFinite(quantite) || quantite <= 0) {
-              erreur = "Quantité invalide : indiquez une quantité supérieure à 0.";
-            }
-          } else if (!article) {
+          if (!article) {
             erreur = articleSaisi
               ? `Article « ${articleSaisi} » à confirmer : aucune correspondance suffisamment sûre.`
               : "Désignation de l'article manquante.";
@@ -471,9 +459,9 @@ export function ImportVentesSection() {
 
           const besoinCorrection = Boolean(
             erreur ||
-            (!horsCatalogue && !article) ||
+            !article ||
             articleType === "approx" ||
-            (!horsCatalogue && article && !modeHistorique && (!emplacementId || disponible < quantite)),
+            (article && !modeHistorique && (!emplacementId || disponible < quantite)),
           );
 
           const verification: VerificationLigne = {
@@ -493,21 +481,22 @@ export function ImportVentesSection() {
             prix,
             erreur,
             besoinCorrection,
-            horsCatalogue,
           };
           verifications.push(verification);
 
-          if (!erreur && ((article && emplacementId) || horsCatalogue)) {
+          // Référence locale explicite : évite que TypeScript perde le
+          // narrowing de `article` dans ce bloc.
+          const articleResolue = article;
+          if (!erreur && articleResolue !== null && emplacementId) {
             lignesResolues.push({
-              article_id: article?.id ?? null,
-              designation: horsCatalogue ? articleSaisi : article!.designation,
-              emplacement_id: horsCatalogue ? null : emplacementId,
+              article_id: articleResolue.id,
+              designation: articleResolue.designation,
+              emplacement_id: emplacementId,
               quantite,
               prix,
-              hors_catalogue: horsCatalogue,
             });
             if (!modeHistorique) {
-              const cleStock = `${article.id}|${emplacementId}`;
+              const cleStock = `${articleResolue.id}|${emplacementId}`;
               quantitesReservees.set(cleStock, (quantitesReservees.get(cleStock) ?? 0) + quantite);
             }
           }
@@ -516,7 +505,7 @@ export function ImportVentesSection() {
         const lignesAvecErreur = verifications.filter((v) => v.erreur);
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
         let doublonProbable = false;
-        if (lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length && nomClient && dateVente && montantTotal > 0) {
+        if (nomClient && dateVente && montantTotal > 0) {
           const clientExistant = clients.find(
             (c) => normaliserDesignation(c.nom) === normaliserDesignation(nomClient),
           ) ?? clients
@@ -546,7 +535,7 @@ export function ImportVentesSection() {
           montantTotal,
           erreurs: [...erreurs, ...lignesAvecErreur.map((v) => v.erreur!).filter(Boolean)],
           doublonProbable,
-          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length && !doublonProbable,
+          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length,
         });
       }
 
@@ -555,7 +544,7 @@ export function ImportVentesSection() {
       setGroupes(resultats);
       setClientOuverts((precedentes) => {
         const next = { ...precedentes };
-        for (const groupe of resultats) next[cleClient(groupe.nomClient)] = true;
+        for (const groupe of resultats) next[groupe.nomClient || "Sans client"] = true;
         return next;
       });
     } catch (err) {
@@ -607,27 +596,16 @@ export function ImportVentesSection() {
     }));
   }
 
-  function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
-    const cle = cleLigne(numero, ligneIndex);
+  async function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
     const next = {
       ...corrections,
-      [cle]: {
-        ...corrections[cle],
+      [cleLigne(numero, ligneIndex)]: {
+        ...corrections[cleLigne(numero, ligneIndex)],
         ...patch,
       },
     };
     setCorrections(next);
-
-    // Une correction ne doit pas relancer immédiatement l'analyse complète
-    // du fichier. Plusieurs contrôles peuvent être corrigés à la suite ; on
-    // attend brièvement la fin de la saisie pour ne lancer qu'une seule
-    // analyse avec toutes les corrections cumulées.
-    if (correctionTimerRef.current) clearTimeout(correctionTimerRef.current);
-    if (lignesBrutesCourantes.length === 0) return;
-    setAnalyse(true);
-    correctionTimerRef.current = setTimeout(() => {
-      void analyser(lignesBrutesCourantes, next);
-    }, 160);
+    if (lignesBrutesCourantes.length > 0) await analyser(lignesBrutesCourantes, next);
   }
 
   async function confirmerImport() {
@@ -659,7 +637,7 @@ export function ImportVentesSection() {
 
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
       if (refError || !refData) {
-        erreursDetail.push(`BL ${groupe.numero} : impossible de générer une référence.`);
+        erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
         echouees += 1;
         continue;
       }
@@ -678,7 +656,7 @@ export function ImportVentesSection() {
         .single();
 
       if (venteError || !vente) {
-        erreursDetail.push(logSupabaseError({ table: "ventes", operation: "insert (import Excel)" }, venteError, `BL ${groupe.numero} : impossible de la créer.`));
+        erreursDetail.push(logSupabaseError({ table: "ventes", operation: "insert (import Excel)" }, venteError, `Vente ${groupe.numero} : impossible de la créer.`));
         echouees += 1;
         continue;
       }
@@ -688,8 +666,6 @@ export function ImportVentesSection() {
           vente_id: vente.id,
           article_id: l.article_id,
           emplacement_id: l.emplacement_id,
-          designation_hors_catalogue: l.hors_catalogue ? l.designation : null,
-          hors_catalogue: Boolean(l.hors_catalogue),
           quantite: l.quantite,
           prix_achat_reference: 0,
           prix_vente_conseille_reference: l.prix,
@@ -699,7 +675,7 @@ export function ImportVentesSection() {
       );
 
       if (lignesError) {
-        erreursDetail.push(`BL ${groupe.numero} : lignes non enregistrées.`);
+        erreursDetail.push(`Vente ${groupe.numero} : lignes non enregistrées.`);
         echouees += 1;
         continue;
       }
@@ -713,7 +689,7 @@ export function ImportVentesSection() {
       if (modeHistorique) {
         const { error: majStatutError } = await supabase.from("ventes").update({ statut: "Validé" }).eq("id", vente.id);
         if (majStatutError) {
-          erreursDetail.push(`BL ${groupe.numero} créée en brouillon, mais non validée.`);
+          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée.`);
           enBrouillon += 1;
           continue;
         }
@@ -730,51 +706,31 @@ export function ImportVentesSection() {
           p_utilisateur_id: user?.id ?? null,
         });
         if (validationError) {
-          erreursDetail.push(`BL ${groupe.numero} créée en brouillon, mais non validée : ${validationError.message}`);
+          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée : ${validationError.message}`);
           enBrouillon += 1;
           continue;
         }
       }
 
-      // Le paiement est saisi ligne par ligne dans Excel, mais enregistré comme
-      // un paiement global de la vente dans la base. On additionne donc les
-      // avances de toutes les lignes du même BL. Cela permet par exemple :
-      // article A = 7 000 d'avance sur 10 000 + article B = 0 d'avance.
-      const avancesLignes = groupe.lignesBrutes.map((ligne, index) => {
-        const brut = ligne["Avance"];
-        const valeur = brut === undefined || brut === null || String(brut).trim() === "" ? 0 : Number(brut);
-        const ligneMontant = groupe.verifications[index] ? groupe.verifications[index].quantite * groupe.verifications[index].prix : 0;
-        return { ligne, index, brut, valeur, ligneMontant };
-      });
-      let avanceTotale = 0;
-      for (const item of avancesLignes) {
-        if (!Number.isFinite(item.valeur) || item.valeur < 0 || item.valeur > item.ligneMontant) {
-          erreursDetail.push(`BL ${groupe.numero} : avance invalide à la ligne ${item.index + 1} (${String(item.brut)}).`);
-          continue;
-        }
-        avanceTotale += item.valeur;
-        const resteBrut = item.ligne["Reste"];
-        if (resteBrut !== undefined && resteBrut !== null && String(resteBrut).trim() !== "") {
-          const resteExcel = Number(resteBrut);
-          const resteAttendu = Math.max(0, item.ligneMontant - item.valeur);
-          if (!Number.isFinite(resteExcel) || resteExcel < 0 || Math.abs(resteExcel - resteAttendu) > 0.01) {
-            erreursDetail.push(`BL ${groupe.numero} : reste invalide à la ligne ${item.index + 1} (${String(resteBrut)}), attendu ${resteAttendu}.`);
-          }
-        }
+      const premiere = groupe.lignesBrutes[0];
+      const avanceBrut = premiere["Avance"];
+      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === "" ? 0 : Number(avanceBrut);
+      const resteBrut = premiere["Reste"];
+      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === "" ? null : Number(resteBrut);
+      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
+        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
+      } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
+        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
       }
-      if (avanceTotale > groupe.montantTotal) {
-        erreursDetail.push(`BL ${groupe.numero} : le total des avances (${avanceTotale}) dépasse le montant total (${groupe.montantTotal}).`);
-      }
-      const lignePaiement = avancesLignes.find((item) => item.valeur > 0)?.ligne ?? groupe.lignesBrutes[0];
-      if (avanceTotale > 0) {
+      if (avance > 0) {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
-          montant: avanceTotale,
-          mode_paiement: String(lignePaiement?.["Mode de paiement"] ?? "").trim() || "Espèces",
+          montant: avance,
+          mode_paiement: String(premiere["Mode de paiement"] ?? "").trim() || "Espèces",
           date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
           created_by: user?.id ?? null,
         });
-        if (paiementError) erreursDetail.push(`BL ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+        if (paiementError) erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
       }
       reussies += 1;
     }
@@ -794,22 +750,14 @@ export function ImportVentesSection() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function cleClient(nom: string) {
-    return normaliserDesignation(nom) || "sans client";
-  }
-
   function groupeParClient() {
-    const groupesClients = new Map<string, { nom: string; groupes: GroupeVente[] }>();
+    const groupesClients = new Map<string, GroupeVente[]>();
     for (const groupe of groupes) {
-      const cle = cleClient(groupe.nomClient);
-      const existant = groupesClients.get(cle);
-      if (existant) {
-        existant.groupes.push(groupe);
-      } else {
-        groupesClients.set(cle, { nom: groupe.nomClient || "Sans client", groupes: [groupe] });
-      }
+      const cle = groupe.nomClient || "Sans client";
+      if (!groupesClients.has(cle)) groupesClients.set(cle, []);
+      groupesClients.get(cle)!.push(groupe);
     }
-    return Array.from(groupesClients.values()).map(({ nom, groupes: groupesDuClient }) => [nom, groupesDuClient] as [string, GroupeVente[]]);
+    return Array.from(groupesClients.entries());
   }
 
   const nbValides = groupes.filter((g) => g.valide).length;
@@ -831,11 +779,7 @@ export function ImportVentesSection() {
               <span className="rounded-md bg-onyx-100 px-2 py-1 text-[11px] font-semibold text-onyx-500">
                 Ligne {verification.ligneIndex + 1}
               </span>
-              {verification.horsCatalogue ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-accent-100 px-2 py-1 text-[11px] font-semibold text-accent-700">
-                  Article hors catalogue
-                </span>
-              ) : articleExactEtStockOK ? (
+              {articleExactEtStockOK ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
                   <PackageCheck size={12} /> Correspondance exacte · stock disponible
                 </span>
@@ -882,12 +826,7 @@ export function ImportVentesSection() {
                 </label>
               )}
 
-              {verification.horsCatalogue ? (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-onyx-400">Emplacement</p>
-                  <p className="mt-1 text-sm font-medium text-accent-700">Hors catalogue · aucun stock</p>
-                </div>
-              ) : articleExactEtStockOK ? (
+              {articleExactEtStockOK ? (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-onyx-400">Emplacement</p>
                   <p className="mt-1 flex items-center gap-1 text-sm font-medium text-onyx-800"><MapPin size={13} /> {verification.emplacementNom}</p>
@@ -928,7 +867,7 @@ export function ImportVentesSection() {
                 value={corrections[key]?.articleDesignation ?? verification.articleSaisi}
                 onChange={(e) => modifierLigne(groupe.numero, verification.ligneIndex, { articleDesignation: e.target.value, articleId: undefined })}
                 onBlur={(e) => void appliquerCorrection(groupe.numero, verification.ligneIndex, { articleDesignation: e.currentTarget.value, articleId: undefined })}
-                placeholder="Nom de l’article…"
+                placeholder="Nom de l'article…"
                 className="w-full rounded-md border border-onyx-200 bg-white px-2.5 py-2 text-sm text-onyx-800 outline-none focus:border-accent-400"
               />
               {verification.suggestionsArticles.length > 0 && (
@@ -950,34 +889,13 @@ export function ImportVentesSection() {
                   ))}
                 </div>
               )}
-              {!verification.article && !verification.horsCatalogue && verification.articleSaisi.trim() && (
-                <button
-                  type="button"
-                  onClick={() => void appliquerCorrection(groupe.numero, verification.ligneIndex, {
-                    horsCatalogue: true,
-                    articleId: undefined,
-                    articleDesignation: verification.articleSaisi,
-                    emplacementId: undefined,
-                  })}
-                  className="mt-2 inline-flex items-center rounded-md border border-accent-200 bg-accent-50 px-3 py-2 text-xs font-semibold text-accent-700 hover:bg-accent-100"
-                >
-                  Utiliser comme article hors catalogue
-                </button>
-              )}
-              {verification.horsCatalogue && (
-                <div className="mt-2 rounded-md border border-accent-100 bg-accent-50 px-3 py-2 text-xs text-accent-700">
-                  Article hors catalogue : enregistré dans la facture sans ajout au catalogue et sans mouvement de stock.
-                </div>
-              )}
             </div>
 
             <div>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-onyx-400">
                 <MapPin size={11} /> Stock disponible par emplacement
               </div>
-              {verification.horsCatalogue ? (
-                <p className="rounded-md bg-accent-50 px-3 py-2 text-xs text-accent-700">Aucun emplacement ni stock ne sont requis pour un article hors catalogue.</p>
-              ) : !verification.article ? (
+              {!verification.article ? (
                 <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d&apos;abord l&apos;article correspondant pour afficher son stock par emplacement.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -1080,14 +998,13 @@ export function ImportVentesSection() {
 
           <div className="mt-3 space-y-4">
             {groupeParClient().map(([client, ventesClient]) => {
-              const clientKey = cleClient(client);
-              const ouvert = clientOuverts[clientKey] !== false;
+              const ouvert = clientOuverts[client] !== false;
               const validesClient = ventesClient.filter((g) => g.valide).length;
               return (
                 <section key={client} className="overflow-hidden rounded-xl border border-onyx-100">
                   <button
                     type="button"
-                    onClick={() => setClientOuverts((p) => ({ ...p, [clientKey]: !ouvert }))}
+                    onClick={() => setClientOuverts((p) => ({ ...p, [client]: !ouvert }))}
                     className="flex w-full items-center justify-between gap-3 bg-onyx-50 px-4 py-3 text-left hover:bg-onyx-100/70"
                   >
                     <div className="flex min-w-0 items-center gap-2">
@@ -1105,7 +1022,7 @@ export function ImportVentesSection() {
                         <div key={groupe.numero} className="p-3 md:p-4">
                           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                             <div>
-                              <span className="text-sm font-semibold text-onyx-800">BL {groupe.numero}</span>
+                              <span className="text-sm font-semibold text-onyx-800">Vente {groupe.numero}</span>
                               <span className="ml-2 text-xs text-onyx-400">{groupe.dateVente ?? "Date non renseignée"}</span>
                             </div>
                             {groupe.valide ? (
@@ -1134,7 +1051,7 @@ export function ImportVentesSection() {
           </div>
 
           <div className="mt-4">
-            <PrimaryButton onClick={confirmerImport} loading={importing} disabled={nbValides === 0 || analyse}>
+            <PrimaryButton onClick={confirmerImport} loading={importing} disabled={nbValides === 0}>
               Importer {nbValides} vente{nbValides > 1 ? "s" : ""}
             </PrimaryButton>
             {importing && progression.total > 0 && (
