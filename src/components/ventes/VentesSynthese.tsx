@@ -361,7 +361,7 @@ export function VentesSynthese() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-3 sm:p-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.5fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-3 sm:p-5 lg:grid-cols-[minmax(320px,1fr)_minmax(0,1.7fr)]">
         <div className="min-w-0 rounded-xl border border-onyx-100 overflow-hidden flex min-h-0 flex-col">
           <div className="shrink-0 border-b border-onyx-100 bg-white px-4 py-3 shadow-sm">
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
