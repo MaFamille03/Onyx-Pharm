@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { BarChart3, CalendarDays, Download, RefreshCw, Users, ChevronDown, ChevronRight, ReceiptText } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BarChart3, CalendarDays, RefreshCw, Users, ChevronDown, ChevronRight, ReceiptText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { SecondaryButton } from "@/components/ui/Buttons";
-import { exporterExcelMisEnForme } from "@/lib/excel";
 import { useRealtimeRefresh } from "@/lib/hooks/useRealtimeRefresh";
 
 const fcfa = (value: number) => `${value.toLocaleString("fr-FR")} FCFA`;
@@ -64,7 +63,8 @@ export function VentesSynthese() {
   const [clients, setClients] = useState<ClientSynthese[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [clientOuvertId, setClientOuvertId] = useState<string | null>(null);
+  const [clientSelectionneNom, setClientSelectionneNom] = useState<string | null>(null);
+  const facSectionRef = useRef<HTMLDivElement | null>(null);
   const [venteOuverteId, setVenteOuverteId] = useState<string | null>(null);
   const [lignesCommande, setLignesCommande] = useState<LigneCommande[]>([]);
   const [paiementsCommande, setPaiementsCommande] = useState<PaiementPeriode[]>([]);
@@ -130,11 +130,27 @@ export function VentesSynthese() {
     if (clientsRes.error) {
       setError((prev) => prev ?? logSupabaseError({ table: "v_synthese_clients_ventes", operation: "select" }, clientsRes.error, "Impossible de charger la situation des clients."));
     } else {
-      setClients(
-        ((clientsRes.data ?? []) as ClientSynthese[]).filter(
-          (client) => typeof client.client_nom === "string" && client.client_nom.trim().length > 0
-        )
-      );
+      // Regroupe les fiches portant le même nom : la situation cumulée est
+      // affichée par nom de client, indépendamment des commandes/fiches liées.
+      const groupes = new Map<string, ClientSynthese>();
+      for (const client of (clientsRes.data ?? []) as ClientSynthese[]) {
+        if (typeof client.client_nom !== "string" || !client.client_nom.trim()) continue;
+        const nom = client.client_nom.trim();
+        const cle = nom.toLocaleLowerCase("fr-FR");
+        const existant = groupes.get(cle);
+        if (!existant) {
+          groupes.set(cle, { ...client, client_nom: nom });
+        } else {
+          existant.nombre_ventes += Number(client.nombre_ventes || 0);
+          existant.total_achats += Number(client.total_achats || 0);
+          existant.total_paye += Number(client.total_paye || 0);
+          existant.total_du += Number(client.total_du || 0);
+          if (client.derniere_vente && (!existant.derniere_vente || client.derniere_vente > existant.derniere_vente)) {
+            existant.derniere_vente = client.derniere_vente;
+          }
+        }
+      }
+      setClients(Array.from(groupes.values()).sort((a, b) => b.total_du - a.total_du));
     }
 
     setLoading(false);
@@ -235,27 +251,11 @@ export function VentesSynthese() {
     }
   }
 
-  function exporter() {
-    exporterExcelMisEnForme(
-      "Synthese_Ventes_Onyx_Pharm",
-      "Clients",
-      ["Client", "Nombre de ventes", "Total achats", "Total payé", "Total dû", "Dernière vente"],
-      clients.map((c) => ({
-        Client: c.client_nom,
-        "Nombre de ventes": c.nombre_ventes,
-        "Total achats": c.total_achats,
-        "Total payé": c.total_paye,
-        "Total dû": c.total_du,
-        "Dernière vente": c.derniere_vente ?? "",
-      }))
-    );
-  }
-
   return (
     <section className="mt-5 rounded-2xl border border-onyx-100 bg-white shadow-sm">
       {/* Zone haute fixe : titre + indicateurs + période analysée */}
       <div className="sticky top-0 z-30 rounded-t-2xl border-b border-onyx-100 bg-white/95 p-4 shadow-sm backdrop-blur sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-3">
           <div>
             <div className="flex items-center gap-2">
               <BarChart3 size={18} className="text-onyx-500" />
@@ -265,109 +265,97 @@ export function VentesSynthese() {
               Le chiffre d&apos;affaires est basé sur les ventes. Les encaissements correspondent uniquement aux paiements réellement enregistrés.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            {([['mois', 'Ce mois'], ['trimestre', 'Ce trimestre'], ['annee', 'Cette année'], ['tout', 'Tout']] as const).map(([id, label]) => (
-              <SecondaryButton key={id} onClick={() => appliquerPeriode(id)} className="min-h-0 w-full justify-center px-2 py-2 text-xs sm:w-auto">
-                {label}
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[auto_1fr] lg:items-center">
+            <div className="flex flex-wrap gap-2">
+              {([['mois', 'Ce mois'], ['trimestre', 'Ce trimestre'], ['annee', 'Cette année'], ['tout', 'Tout']] as const).map(([id, label]) => (
+                <SecondaryButton key={id} onClick={() => appliquerPeriode(id)} className="min-h-0 flex-1 justify-center px-3 py-2 text-xs sm:flex-none">
+                  {label}
+                </SecondaryButton>
+              ))}
+              <SecondaryButton onClick={load} className="min-h-0 flex-1 justify-center px-3 py-2 text-xs sm:flex-none" disabled={loading}>
+                <RefreshCw size={14} /> Actualiser
               </SecondaryButton>
-            ))}
-            <SecondaryButton onClick={exporter} className="min-h-0 w-full justify-center px-2 py-2 text-xs sm:w-auto">
-              <Download size={14} /> Exporter clients
-            </SecondaryButton>
-            <SecondaryButton onClick={load} className="min-h-0 w-full justify-center px-2 py-2 text-xs sm:w-auto" disabled={loading}>
-              <RefreshCw size={14} /> Actualiser
-            </SecondaryButton>
-          </div>
-        </div>
+            </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl bg-onyx-50 p-3">
-            <p className="text-xs text-onyx-500">Nombre de ventes</p>
-            <p className="mt-1 text-lg font-semibold text-onyx-900">{nombreVentes}</p>
-          </div>
-          <div className="rounded-xl bg-onyx-50 p-3">
-            <p className="text-xs text-onyx-500">Chiffre d&apos;affaires</p>
-            <p className="mt-1 text-lg font-semibold text-onyx-900">{fcfa(totalVentes)}</p>
-          </div>
-          <div className="rounded-xl bg-onyx-50 p-3">
-            <p className="text-xs text-onyx-500">Encaissements période</p>
-            <p className="mt-1 text-lg font-semibold text-emerald-600">{fcfa(encaissementsPeriode)}</p>
-          </div>
-          <div className="rounded-xl bg-red-50 p-3">
-            <p className="text-xs text-red-600">Créances clients totales</p>
-            <p className="mt-1 text-lg font-semibold text-red-700">{fcfa(creancesGlobales)}</p>
-          </div>
-        </div>
-
-        <div className="mt-3 rounded-xl border border-onyx-100">
-          <div className="grid gap-3 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:px-4 sm:py-2">
-            <div className="flex min-w-0 items-start gap-2 sm:min-w-[165px] sm:items-center">
-              <CalendarDays size={16} className="text-onyx-400" />
-              <div>
-                <h3 className="text-sm font-semibold text-onyx-800">Période analysée</h3>
-                <p className="text-[11px] text-onyx-400">Du {new Date(debut).toLocaleDateString("fr-FR")} au {new Date(fin).toLocaleDateString("fr-FR")}</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="flex min-w-0 items-center gap-2 rounded-lg border border-onyx-100 px-2.5 py-1.5">
+                <CalendarDays size={15} className="shrink-0 text-onyx-400" />
+                <label className="shrink-0 text-xs font-medium text-onyx-600">Du</label>
+                <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="min-w-0 w-full border-0 bg-transparent p-0 text-sm outline-none" />
+              </div>
+              <div className="flex min-w-0 items-center gap-2 rounded-lg border border-onyx-100 px-2.5 py-1.5">
+                <CalendarDays size={15} className="shrink-0 text-onyx-400" />
+                <label className="shrink-0 text-xs font-medium text-onyx-600">Au</label>
+                <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="min-w-0 w-full border-0 bg-transparent p-0 text-sm outline-none" />
               </div>
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2 sm:min-w-[145px]">
-              <label className="whitespace-nowrap text-xs font-medium text-onyx-600">Du</label>
-              <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-2.5 py-1.5 text-sm" />
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2 sm:min-w-[145px]">
-              <label className="whitespace-nowrap text-xs font-medium text-onyx-600">Au</label>
-              <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-2.5 py-1.5 text-sm" />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-onyx-100 px-3 py-2.5">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-onyx-800">Période analysée</h3>
+              <p className="text-[11px] text-onyx-400">Du {new Date(debut).toLocaleDateString("fr-FR")} au {new Date(fin).toLocaleDateString("fr-FR")}</p>
             </div>
             <div className="flex items-center text-xs text-onyx-500">
               <Users size={14} className="mr-1.5" /> {clientsActifsPeriode} client(s) distinct(s)
             </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-xl bg-onyx-50 p-3"><p className="text-xs text-onyx-500">Nombre de ventes</p><p className="mt-1 text-lg font-semibold text-onyx-900">{nombreVentes}</p></div>
+            <div className="rounded-xl bg-onyx-50 p-3"><p className="text-xs text-onyx-500">Chiffre d&apos;affaires</p><p className="mt-1 text-lg font-semibold text-onyx-900">{fcfa(totalVentes)}</p></div>
+            <div className="rounded-xl bg-onyx-50 p-3"><p className="text-xs text-onyx-500">Encaissements période</p><p className="mt-1 text-lg font-semibold text-emerald-600">{fcfa(encaissementsPeriode)}</p></div>
+            <div className="rounded-xl bg-red-50 p-3"><p className="text-xs text-red-600">Créances clients totales</p><p className="mt-1 text-lg font-semibold text-red-700">{fcfa(creancesGlobales)}</p></div>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-3 p-3 sm:gap-4 sm:p-5 lg:grid-cols-2">
-        {/* Colonne gauche : clients déroulants */}
-        <div className="rounded-xl border border-onyx-100">
+      <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.5fr)]">
+        <div className="min-w-0 rounded-xl border border-onyx-100">
           <div className="border-b border-onyx-100 px-4 py-3">
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
-            <p className="text-xs text-onyx-400">Un client = une ligne déroulante. Les montants sont cumulés sur toutes ses commandes.</p>
+            <p className="text-xs text-onyx-400">Un nom = une situation cumulée, toutes ses commandes confondues. Cliquez sur un client pour afficher ses FAC.</p>
           </div>
-          <div className="max-h-[540px] overflow-y-auto">
+          <div className="divide-y divide-onyx-50">
             {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
-              const ouvert = clientOuvertId === c.client_id;
+              const selectionne = clientSelectionneNom?.toLocaleLowerCase("fr-FR") === c.client_nom.toLocaleLowerCase("fr-FR");
               return (
-                <div key={c.client_id} className="border-b border-onyx-50 last:border-0">
-                  <button type="button" onClick={() => { setClientOuvertId(ouvert ? null : c.client_id); setVenteOuverteId(null); }} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
-                    <div className="flex min-w-0 items-center gap-2">
-                      {ouvert ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      <span className="truncate text-sm font-medium text-onyx-800">{c.client_nom}</span>
+                <button key={c.client_nom.toLocaleLowerCase("fr-FR")} type="button" onClick={() => {
+                  setClientSelectionneNom(c.client_nom);
+                  setVenteOuverteId(null);
+                  window.setTimeout(() => facSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                }} className={`block w-full px-4 py-3 text-left transition ${selectionne ? "bg-onyx-50 ring-1 ring-inset ring-onyx-200" : "hover:bg-onyx-50/60"}`}>
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-onyx-800">{c.client_nom}</p>
+                      <p className="mt-1 text-xs text-onyx-400">{c.nombre_ventes} commande{c.nombre_ventes > 1 ? "s" : ""} · dernier achat {c.derniere_vente ? new Date(c.derniere_vente).toLocaleDateString("fr-FR") : "—"}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-xs text-onyx-400">{c.nombre_ventes} commande{c.nombre_ventes > 1 ? "s" : ""}</p>
-                      <p className="text-sm font-semibold text-onyx-800">{fcfa(c.total_achats)}</p>
+                      <p className="text-xs text-onyx-400">Dû</p>
+                      <p className={`text-sm font-bold ${c.total_du > 0 ? "text-red-600" : "text-emerald-600"}`}>{fcfa(Math.max(0, c.total_du))}</p>
                     </div>
-                  </button>
-                  {ouvert && (
-                    <div className="grid grid-cols-2 gap-2 bg-onyx-50/50 px-4 pb-3 pt-1 text-xs sm:px-10 sm:grid-cols-4">
-                      <div><p className="text-onyx-400">Achats</p><p className="font-semibold text-onyx-700">{fcfa(c.total_achats)}</p></div>
-                      <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(c.total_paye)}</p></div>
-                      <div><p className="text-onyx-400">Dû</p><p className={`font-semibold ${c.total_du > 0 ? "text-red-600" : "text-onyx-500"}`}>{fcfa(Math.max(0, c.total_du))}</p></div>
-                      <div><p className="text-onyx-400">Dernier achat</p><p className="font-semibold text-onyx-700">{c.derniere_vente ? new Date(c.derniere_vente).toLocaleDateString("fr-FR") : "—"}</p></div>
-                    </div>
-                  )}
-                </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div><p className="text-onyx-400">Achats</p><p className="font-semibold text-onyx-700">{fcfa(c.total_achats)}</p></div>
+                    <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(c.total_paye)}</p></div>
+                    <div><p className="text-onyx-400">Situation</p><p className="font-semibold text-onyx-700">{c.total_du > 0 ? "À régler" : "Soldée"}</p></div>
+                  </div>
+                </button>
               );
             })}
           </div>
         </div>
 
-        {/* Colonne droite : FAC du client sélectionné */}
-        <div className="rounded-xl border border-onyx-100">
+        <div ref={facSectionRef} className="min-w-0 scroll-mt-4 rounded-xl border border-onyx-100">
           <div className="border-b border-onyx-100 px-4 py-3">
             <h3 className="text-sm font-semibold text-onyx-800">FAC du client sélectionné</h3>
-            <p className="text-xs text-onyx-400">Chaque FAC est déroulante et reprend les mêmes informations financières.</p>
+            <p className="text-xs text-onyx-400">Les factures de toutes les commandes liées au même nom de client sont regroupées ici.</p>
           </div>
-          <div className="max-h-[540px] overflow-y-auto">
-            {!clientOuvertId ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client à gauche.</p> : (() => {
-              const facs = ventes.filter((v) => v.client_id === clientOuvertId);
+          <div>
+            {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses FAC.</p> : (() => {
+              const nomCle = clientSelectionneNom.toLocaleLowerCase("fr-FR");
+              const facs = ventes.filter((v) => v.clients?.[0]?.nom?.trim().toLocaleLowerCase("fr-FR") === nomCle);
               if (!facs.length) return <p className="p-6 text-sm text-onyx-400">Aucune FAC sur la période sélectionnée.</p>;
               return facs.map((v) => {
                 const ouvert = venteOuverteId === v.id;
@@ -376,88 +364,37 @@ export function VentesSynthese() {
                 const reste = Math.max(0, total - paye);
                 return (
                   <div key={v.id} className="border-b border-onyx-50 last:border-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // La FAC de droite reprend désormais l'action des anciennes FAC du bas :
-                        // ouvrir la vente complète. On conserve la liste, les montants et le
-                        // rattachement au client ; seul le comportement au clic change.
-                        window.location.href = `/ventes/ventes?ouvrir=${encodeURIComponent(v.id)}`;
-                      }}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        {ouvert ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        <ReceiptText size={15} className="shrink-0 text-onyx-400" />
-                        <span className="truncate text-sm font-medium text-onyx-800">{v.reference}</span>
+                    <button type="button" onClick={() => setVenteOuverteId(ouvert ? null : v.id)} className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-onyx-50/60">
+                      <div className="flex min-w-0 items-start gap-2">
+                        {ouvert ? <ChevronDown size={16} className="mt-0.5 shrink-0" /> : <ChevronRight size={16} className="mt-0.5 shrink-0" />}
+                        <ReceiptText size={15} className="mt-0.5 shrink-0 text-onyx-400" />
+                        <div className="min-w-0"><p className="break-all text-sm font-medium text-onyx-800">{v.reference}</p><p className="mt-0.5 text-xs text-onyx-400">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</p></div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className="text-xs text-onyx-400">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</p>
-                        <p className={`text-sm font-semibold ${reste > 0 ? "text-red-600" : "text-emerald-600"}`}>{reste === 0 ? "Soldée" : paye > 0 ? `Avance · reste ${fcfa(reste)}` : `Non payée · reste ${fcfa(reste)}`}</p>
+                        <p className={`text-sm font-semibold ${reste > 0 ? "text-red-600" : "text-emerald-600"}`}>{reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée"}</p>
+                        <p className="mt-0.5 text-xs text-onyx-400">Reste {fcfa(reste)}</p>
                       </div>
                     </button>
                     {ouvert && (
-                      <div className="bg-onyx-50/50 px-10 pb-4 pt-2">
+                      <div className="bg-onyx-50/50 px-4 pb-4 pt-2 sm:px-10">
                         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                           <div><p className="text-onyx-400">Total</p><p className="font-semibold text-onyx-700">{fcfa(total)}</p></div>
                           <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(paye)}</p></div>
                           <div><p className="text-onyx-400">Reste</p><p className={`font-semibold ${reste > 0 ? "text-red-600" : "text-onyx-500"}`}>{fcfa(reste)}</p></div>
                           <div><p className="text-onyx-400">Statut</p><p className="font-semibold text-onyx-700">{v.statut}</p></div>
                         </div>
-
                         <div className="mt-3 rounded-lg border border-onyx-100 bg-white">
-                          <div className="border-b border-onyx-100 px-3 py-2">
-                            <p className="text-xs font-semibold text-onyx-700">Détails de la commande</p>
-                            <p className="text-[11px] text-onyx-400">Articles réellement enregistrés sur cette facture.</p>
-                          </div>
-                          {loadingCommande ? (
-                            <p className="px-3 py-4 text-xs text-onyx-400">Chargement des détails...</p>
-                          ) : lignesCommande.length === 0 ? (
-                            <p className="px-3 py-4 text-xs text-onyx-400">Aucune ligne d&apos;article enregistrée.</p>
-                          ) : (
+                          <div className="border-b border-onyx-100 px-3 py-2"><p className="text-xs font-semibold text-onyx-700">Détails de la commande</p><p className="text-[11px] text-onyx-400">Articles réellement enregistrés sur cette facture.</p></div>
+                          {loadingCommande ? <p className="px-3 py-4 text-xs text-onyx-400">Chargement des détails...</p> : lignesCommande.length === 0 ? <p className="px-3 py-4 text-xs text-onyx-400">Aucune ligne d&apos;article enregistrée.</p> : (
                             <div className="divide-y divide-onyx-50">
                               {lignesCommande.map((ligne) => {
-                                const prix = Number(ligne.prix_vente_reel) || 0;
-                                const quantite = Number(ligne.quantite) || 0;
-                                const remise = Number(ligne.remise) || 0;
-                                const sousTotal = Math.max(0, quantite * prix - remise);
-                                return (
-                                  <div key={ligne.id} className="px-3 py-2.5 text-xs">
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <p className="font-medium text-onyx-800">{ligne.articles?.[0]?.designation || "Article enregistré"}</p>
-                                        <p className="mt-0.5 text-[11px] text-onyx-400">
-                                          Qté {quantite} × {fcfa(prix)}
-                                          {ligne.emplacements?.[0]?.nom ? ` · ${ligne.emplacements[0].nom}` : ""}
-                                          {remise > 0 ? ` · remise ${fcfa(remise)}` : ""}
-                                        </p>
-                                      </div>
-                                      <p className="shrink-0 font-semibold text-onyx-800">{fcfa(sousTotal)}</p>
-                                    </div>
-                                  </div>
-                                );
+                                const prix = Number(ligne.prix_vente_reel) || 0; const quantite = Number(ligne.quantite) || 0; const remise = Number(ligne.remise) || 0; const sousTotal = Math.max(0, quantite * prix - remise);
+                                return <div key={ligne.id} className="px-3 py-2.5 text-xs"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium text-onyx-800">{ligne.articles?.[0]?.designation || "Article enregistré"}</p><p className="mt-0.5 break-words text-[11px] text-onyx-400">Qté {quantite} × {fcfa(prix)}{ligne.emplacements?.[0]?.nom ? ` · ${ligne.emplacements[0].nom}` : ""}{remise > 0 ? ` · remise ${fcfa(remise)}` : ""}</p></div><p className="shrink-0 font-semibold text-onyx-800">{fcfa(sousTotal)}</p></div></div>;
                               })}
                             </div>
                           )}
                         </div>
-
-                        <div className="mt-3 rounded-lg border border-onyx-100 bg-white">
-                          <div className="border-b border-onyx-100 px-3 py-2">
-                            <p className="text-xs font-semibold text-onyx-700">Paiements enregistrés</p>
-                          </div>
-                          {paiementsCommande.length === 0 ? (
-                            <p className="px-3 py-3 text-xs text-onyx-400">Aucun paiement enregistré sur cette facture.</p>
-                          ) : (
-                            <div className="divide-y divide-onyx-50">
-                              {paiementsCommande.map((paiement, index) => (
-                                <div key={`${paiement.date_paiement}-${index}`} className="flex items-center justify-between px-3 py-2 text-xs">
-                                  <span className="text-onyx-500">{new Date(paiement.date_paiement).toLocaleDateString("fr-FR")}</span>
-                                  <span className="font-semibold text-emerald-600">{fcfa(Number(paiement.montant) || 0)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        <div className="mt-3 rounded-lg border border-onyx-100 bg-white"><div className="border-b border-onyx-100 px-3 py-2"><p className="text-xs font-semibold text-onyx-700">Paiements enregistrés</p></div>{paiementsCommande.length === 0 ? <p className="px-3 py-3 text-xs text-onyx-400">Aucun paiement enregistré sur cette facture.</p> : <div className="divide-y divide-onyx-50">{paiementsCommande.map((paiement, index) => <div key={`${paiement.date_paiement}-${index}`} className="flex items-center justify-between gap-3 px-3 py-2 text-xs"><span className="text-onyx-500">{new Date(paiement.date_paiement).toLocaleDateString("fr-FR")}</span><span className="shrink-0 font-semibold text-emerald-600">{fcfa(Number(paiement.montant) || 0)}</span></div>)}</div>}</div>
                       </div>
                     )}
                   </div>
