@@ -207,7 +207,7 @@ export function CaisseManager({
         <select
           value={filtreCategorie}
           onChange={(e) => setFiltreCategorie(e.target.value)}
-          className="rounded-lg border border-onyx-200 px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+          className="w-full rounded-lg border border-onyx-200 px-3 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100 sm:w-auto"
         >
           <option value="">Toutes les catégories</option>
           {categories.map((c) => (
@@ -216,7 +216,7 @@ export function CaisseManager({
             </option>
           ))}
         </select>
-        <p className="ml-auto text-sm font-medium text-onyx-600">
+        <p className="text-sm font-medium text-onyx-600 sm:ml-auto">
           Total affiché :{" "}
           <span
             className={isEncaissement ? "text-emerald-600" : "text-red-500"}
@@ -238,8 +238,10 @@ export function CaisseManager({
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-onyx-100 bg-white">
-            <table className="w-full text-sm">
+          <>
+          <div className="hidden overflow-hidden rounded-xl border border-onyx-100 bg-white md:block">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-sm">
               <thead>
                 <tr className="border-b border-onyx-100 bg-onyx-50/50 text-left text-xs font-medium uppercase tracking-wide text-onyx-400">
                   <th className="px-4 py-3">Date</th>
@@ -294,7 +296,34 @@ export function CaisseManager({
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
+          <div className="space-y-2 md:hidden">
+            {filtres.map((o) => (
+              <div key={o.id} className="rounded-xl border border-onyx-100 bg-white p-3.5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-onyx-800">
+                      {o.description || o.ventes?.reference || o.achats?.reference || o.reference}
+                    </p>
+                    {(o.clients?.nom || o.fournisseurs?.nom) && (
+                      <p className="mt-0.5 break-words text-xs text-onyx-400">{o.clients?.nom || o.fournisseurs?.nom}</p>
+                    )}
+                  </div>
+                  <span className={`shrink-0 text-sm font-semibold ${isEncaissement ? "text-emerald-600" : "text-red-500"}`}>
+                    {o.montant.toLocaleString("fr-FR")} F
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-onyx-100 pt-2.5 text-xs">
+                  <div><p className="text-onyx-400">Date</p><p className="mt-0.5 font-medium text-onyx-600">{new Date(o.date_operation).toLocaleDateString("fr-FR")}</p></div>
+                  <div><p className="text-onyx-400">Catégorie</p><p className="mt-0.5 break-words font-medium text-onyx-600">{o.categorie || "—"}</p></div>
+                  <div><p className="text-onyx-400">Mode</p><p className="mt-0.5 break-words font-medium text-onyx-600">{o.mode_paiement}</p></div>
+                  <div><p className="text-onyx-400">Référence</p><p className="mt-0.5 break-all font-medium text-onyx-600">{o.reference}</p></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </div>
 

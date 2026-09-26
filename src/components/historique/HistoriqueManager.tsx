@@ -169,10 +169,10 @@ export function HistoriqueManager() {
               return (
                 <div
                   key={e.id}
-                  className="rounded-lg border border-onyx-100 bg-white p-3.5"
+                  className="rounded-xl border border-onyx-100 bg-white p-3.5 shadow-sm"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                           COULEURS_ACTION[e.action] ?? "bg-onyx-100 text-onyx-600"
@@ -189,8 +189,8 @@ export function HistoriqueManager() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="whitespace-nowrap text-xs text-onyx-400">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-onyx-400">
                         {new Date(e.created_at).toLocaleString("fr-FR", {
                           day: "2-digit",
                           month: "2-digit",
@@ -210,17 +210,17 @@ export function HistoriqueManager() {
                       )}
                     </div>
                   </div>
-                  <p className="mt-1.5 text-sm text-onyx-700">
+                  <p className="mt-2 break-words text-sm leading-5 text-onyx-700">
                     {e.profiles?.nom_complet || e.profiles?.email || "Système"}
                     {e.description ? ` — ${e.description}` : ""}
                   </p>
                   {e.donnees_annulation?.article_designation && (
-                    <p className="mt-0.5 text-xs font-medium text-onyx-500">
+                    <p className="mt-1 break-words text-xs font-medium text-onyx-500">
                       Article concerné : {e.donnees_annulation.article_designation}
                     </p>
                   )}
                   {(e.ancienne_valeur !== null || e.nouvelle_valeur !== null) && (
-                    <p className="mt-1 text-xs text-onyx-400">
+                    <p className="mt-1 break-words text-xs leading-5 text-onyx-400">
                       {formatValeur(e.ancienne_valeur)} →{" "}
                       <span className="font-medium text-onyx-600">
                         {formatValeur(e.nouvelle_valeur)}

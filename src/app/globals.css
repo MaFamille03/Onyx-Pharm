@@ -46,115 +46,6 @@ textarea {
   }
 }
 
-
-
-/* --------------------------------------------------------------------------
- * Responsive mobile layer
- * --------------------------------------------------------------------------
- * The application is desktop-first in several legacy screens. This layer is
- * intentionally centralized so every page inside AppShell gets the same
- * mobile behaviour without duplicating responsive rules in every manager.
- */
-.mobile-responsive {
-  min-width: 0;
-  width: 100%;
-}
-
-.mobile-responsive * {
-  min-width: 0;
-}
-
-@media (max-width: 639px) {
-  /* Prevent dense dashboard/form grids from becoming unusable on phones. */
-  .mobile-responsive .grid.grid-cols-12 {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .mobile-responsive .grid.grid-cols-4:not([class~="sm:grid-cols-4"]):not([class~="md:grid-cols-4"]):not([class~="lg:grid-cols-4"]) {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .mobile-responsive .grid.grid-cols-3:not([class~="sm:grid-cols-3"]):not([class~="sm:grid-cols-4"]):not([class~="md:grid-cols-3"]):not([class~="lg:grid-cols-3"]) {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .mobile-responsive .grid.grid-cols-2:not([class~="sm:grid-cols-2"]):not([class~="sm:grid-cols-3"]):not([class~="sm:grid-cols-4"]):not([class~="md:grid-cols-2"]):not([class~="lg:grid-cols-2"]) {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  /* Header/action rows wrap instead of pushing content outside the viewport. */
-  .mobile-responsive .flex.items-center.justify-between,
-  .mobile-responsive .flex.items-start.justify-between {
-    flex-wrap: wrap;
-    row-gap: 0.625rem;
-  }
-
-  /* Button/filter groups may wrap on narrow screens. Horizontal scrollers keep
-     their existing behaviour and are excluded. */
-  .mobile-responsive .flex.gap-2:not(.overflow-x-auto),
-  .mobile-responsive .flex.gap-3:not(.overflow-x-auto),
-  .mobile-responsive .flex.gap-4:not(.overflow-x-auto) {
-    flex-wrap: wrap;
-  }
-
-  /* Keep controls readable and easy to tap. */
-  .mobile-responsive button,
-  .mobile-responsive a,
-  .mobile-responsive input,
-  .mobile-responsive select,
-  .mobile-responsive textarea {
-    max-width: 100%;
-  }
-
-  /* Tables remain fully readable and can be swiped horizontally when they
-     contain many accounting/stock columns. */
-  .mobile-responsive .overflow-x-auto {
-    max-width: 100%;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-  }
-
-  .mobile-responsive table {
-    min-width: 100%;
-  }
-
-  .mobile-responsive th,
-  .mobile-responsive td {
-    max-width: 260px;
-  }
-
-  /* Cards and dense panels should not create accidental horizontal overflow. */
-  .mobile-responsive img,
-  .mobile-responsive svg {
-    max-width: 100%;
-  }
-
-  /* Give the content enough room above the fixed bottom navigation. */
-  .mobile-responsive {
-    padding-bottom: max(5rem, calc(4rem + env(safe-area-inset-bottom)));
-  }
-}
-
-@media (min-width: 640px) {
-  .mobile-responsive {
-    padding-bottom: 0;
-  }
-}
-
-/* Prevent long references, e-mails and imported values from forcing a page
-   wider than the phone. */
-.mobile-responsive p,
-.mobile-responsive span,
-.mobile-responsive label,
-.mobile-responsive td,
-.mobile-responsive th,
-.mobile-responsive h1,
-.mobile-responsive h2,
-.mobile-responsive h3,
-.mobile-responsive h4 {
-  overflow-wrap: anywhere;
-}
-
 /* Impression de documents (factures, bons, devis) : seule la zone marquée
    .zone-impression reste visible, tout le reste de l'application (menu,
    barres de navigation) est masqué. */
@@ -174,5 +65,43 @@ textarea {
   }
   .no-print {
     display: none !important;
+  }
+}
+
+
+/* Mobile layout: prevent cramped text, accidental horizontal overflow and
+   oversized controls. Desktop layout remains unchanged. */
+@media (max-width: 767px) {
+  main {
+    min-width: 0;
+  }
+
+  main .break-words,
+  main p,
+  main span,
+  main h1,
+  main h2,
+  main h3,
+  main label {
+    overflow-wrap: anywhere;
+  }
+
+  main input,
+  main select,
+  main textarea,
+  main button {
+    max-width: 100%;
+  }
+
+  main table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  /* Native horizontal scrolling remains available only where a true table
+     is intentionally kept on mobile. */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 }

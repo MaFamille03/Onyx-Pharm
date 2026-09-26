@@ -202,7 +202,7 @@ export function TableauDeBordManager({
             Vue d&apos;ensemble de l&apos;activité ONYX PHARM.
           </p>
         </div>
-        <div className="flex gap-1.5 overflow-x-auto rounded-lg bg-onyx-50 p-1">
+        <div className="grid grid-cols-2 gap-1.5 rounded-lg bg-onyx-50 p-1 sm:flex sm:overflow-x-auto">
           {(
             [
               { id: "aujourdhui", label: "Aujourd'hui" },
@@ -214,7 +214,7 @@ export function TableauDeBordManager({
             <button
               key={p.id}
               onClick={() => setPeriode(p.id)}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`min-w-0 rounded-md px-2.5 py-2 text-center text-xs font-medium transition-colors sm:shrink-0 sm:px-3 sm:py-1.5 sm:text-sm ${
                 periode === p.id
                   ? "bg-white text-onyx-900 shadow-sm"
                   : "text-onyx-500 hover:text-onyx-700"
@@ -232,7 +232,7 @@ export function TableauDeBordManager({
         </p>
       ) : (
         <>
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
             <Carte
               icon={ShoppingCart}
               label="Chiffre d'affaires"
@@ -253,7 +253,7 @@ export function TableauDeBordManager({
             />
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
             <Carte
               icon={Truck}
               label="Dettes fournisseurs"
@@ -306,10 +306,10 @@ export function TableauDeBordManager({
                   {venteRecentes.map((v) => (
                     <div
                       key={v.reference}
-                      className="flex items-center justify-between rounded-md bg-onyx-50/50 px-3 py-2 text-sm"
+                      className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-onyx-50/50 px-3 py-2 text-sm"
                     >
-                      <span className="text-onyx-600">{v.reference}</span>
-                      <span className="font-medium text-onyx-800">
+                      <span className="min-w-0 truncate text-onyx-600">{v.reference}</span>
+                      <span className="shrink-0 font-medium text-onyx-800">
                         {v.montant_total.toLocaleString("fr-FR")} F
                       </span>
                     </div>
@@ -331,10 +331,10 @@ export function TableauDeBordManager({
                   {conteneursRecents.map((c) => (
                     <div
                       key={c.code}
-                      className="flex items-center justify-between rounded-md bg-onyx-50/50 px-3 py-2 text-sm"
+                      className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-onyx-50/50 px-3 py-2 text-sm"
                     >
-                      <span className="text-onyx-600">{c.code}</span>
-                      <span className="font-medium text-onyx-800">
+                      <span className="min-w-0 truncate text-onyx-600">{c.code}</span>
+                      <span className="shrink-0 font-medium text-onyx-800">
                         {c.montant_achat_global !== null
                           ? `${c.montant_achat_global.toLocaleString("fr-FR")} F`
                           : "—"}

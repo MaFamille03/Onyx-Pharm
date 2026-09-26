@@ -294,6 +294,8 @@ export function SoldeManager() {
 
   let cumulAffiche = periode === "tout" ? soldeInitial : 0;
 
+  let cumulAfficheMobile = periode === "tout" ? soldeInitial : 0;
+
   return (
     <div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -334,7 +336,7 @@ export function SoldeManager() {
         </div>
       </div>
 
-      <div className="mt-5 flex gap-1.5 overflow-x-auto rounded-lg bg-onyx-50 p-1">
+      <div className="mt-5 grid grid-cols-2 gap-1.5 rounded-lg bg-onyx-50 p-1 sm:flex sm:overflow-x-auto">
         {(
           [
             { id: "tout", label: "Depuis le début" },
@@ -347,7 +349,7 @@ export function SoldeManager() {
           <button
             key={p.id}
             onClick={() => setPeriode(p.id)}
-            className={`shrink-0 rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
+            className={`min-w-0 rounded-md px-2 py-2 text-center text-xs font-medium transition-colors sm:shrink-0 sm:px-3.5 sm:text-sm ${
               periode === p.id
                 ? "bg-white text-onyx-900 shadow-sm"
                 : "text-onyx-500 hover:text-onyx-700"
@@ -359,7 +361,7 @@ export function SoldeManager() {
       </div>
 
       {periode === "mois_choisi" && (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex">
           <select
             value={moisChoisi}
             onChange={(e) => setMoisChoisi(Number(e.target.value))}
@@ -394,7 +396,7 @@ export function SoldeManager() {
         </p>
       ) : (
         <>
-          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
             <div className="rounded-xl border border-onyx-100 bg-white p-5">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
                 <TrendingUp size={18} />
@@ -429,8 +431,9 @@ export function SoldeManager() {
             </div>
           </div>
 
-          <div className="mt-5 overflow-x-auto rounded-xl border border-onyx-100 bg-white">
-            <table className="w-full text-sm">
+          <div className="mt-5 hidden overflow-hidden rounded-xl border border-onyx-100 bg-white md:block">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-onyx-100 bg-onyx-50/50 text-left text-xs font-medium uppercase tracking-wide text-onyx-400">
                   <th className="px-4 py-3">N°</th>
@@ -499,6 +502,40 @@ export function SoldeManager() {
                 )}
               </tbody>
             </table>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-2 md:hidden">
+            {periode === "tout" && (
+              <div className="rounded-xl border border-onyx-200 bg-onyx-50/60 p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div><p className="text-xs text-onyx-400">Solde initial</p><p className="mt-1 text-sm font-semibold text-onyx-800">Avant les opérations</p></div>
+                  <p className="text-sm font-semibold text-onyx-900">{soldeInitial.toLocaleString("fr-FR")} F</p>
+                </div>
+              </div>
+            )}
+            {lignes.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-onyx-200 bg-white p-6 text-center text-sm text-onyx-400">
+                {periode === "tout" ? "Aucune opération enregistrée depuis le solde initial." : "Aucune opération sur la période."}
+              </div>
+            ) : lignes.map((l, i) => {
+              cumulAfficheMobile += l.recette - l.depense;
+              return (
+                <div key={l.id} className="rounded-xl border border-onyx-100 bg-white p-3.5 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-onyx-800">{l.description || l.reference}</p>
+                      <p className="mt-0.5 text-xs text-onyx-400">{new Date(l.date_operation).toLocaleDateString("fr-FR")} · #{i + 1}</p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold text-onyx-900">{cumulAfficheMobile.toLocaleString("fr-FR")} F</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-onyx-100 pt-2.5 text-xs">
+                    <div><p className="text-onyx-400">Recette</p><p className="mt-0.5 font-semibold text-emerald-600">{l.recette ? `${l.recette.toLocaleString("fr-FR")} F` : "—"}</p></div>
+                    <div><p className="text-onyx-400">Dépense</p><p className="mt-0.5 font-semibold text-red-500">{l.depense ? `${l.depense.toLocaleString("fr-FR")} F` : "—"}</p></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </>
       )}

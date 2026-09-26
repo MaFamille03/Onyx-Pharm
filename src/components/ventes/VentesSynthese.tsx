@@ -265,16 +265,16 @@ export function VentesSynthese() {
               Le chiffre d&apos;affaires est basé sur les ventes. Les encaissements correspondent uniquement aux paiements réellement enregistrés.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             {([['mois', 'Ce mois'], ['trimestre', 'Ce trimestre'], ['annee', 'Cette année'], ['tout', 'Tout']] as const).map(([id, label]) => (
-              <SecondaryButton key={id} onClick={() => appliquerPeriode(id)} className="min-h-0 px-2.5 py-1.5 text-xs">
+              <SecondaryButton key={id} onClick={() => appliquerPeriode(id)} className="min-h-0 w-full justify-center px-2 py-2 text-xs sm:w-auto">
                 {label}
               </SecondaryButton>
             ))}
-            <SecondaryButton onClick={exporter} className="min-h-0 px-2.5 py-1.5 text-xs">
+            <SecondaryButton onClick={exporter} className="min-h-0 w-full justify-center px-2 py-2 text-xs sm:w-auto">
               <Download size={14} /> Exporter clients
             </SecondaryButton>
-            <SecondaryButton onClick={load} className="min-h-0 px-2.5 py-1.5 text-xs" disabled={loading}>
+            <SecondaryButton onClick={load} className="min-h-0 w-full justify-center px-2 py-2 text-xs sm:w-auto" disabled={loading}>
               <RefreshCw size={14} /> Actualiser
             </SecondaryButton>
           </div>
@@ -300,30 +300,30 @@ export function VentesSynthese() {
         </div>
 
         <div className="mt-3 rounded-xl border border-onyx-100">
-          <div className="flex flex-wrap items-center gap-3 px-4 py-2">
-            <div className="flex min-w-[165px] items-center gap-2">
+          <div className="grid gap-3 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:px-4 sm:py-2">
+            <div className="flex min-w-0 items-start gap-2 sm:min-w-[165px] sm:items-center">
               <CalendarDays size={16} className="text-onyx-400" />
               <div>
                 <h3 className="text-sm font-semibold text-onyx-800">Période analysée</h3>
                 <p className="text-[11px] text-onyx-400">Du {new Date(debut).toLocaleDateString("fr-FR")} au {new Date(fin).toLocaleDateString("fr-FR")}</p>
               </div>
             </div>
-            <div className="flex min-w-[145px] flex-1 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:min-w-[145px]">
               <label className="whitespace-nowrap text-xs font-medium text-onyx-600">Du</label>
               <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-2.5 py-1.5 text-sm" />
             </div>
-            <div className="flex min-w-[145px] flex-1 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:min-w-[145px]">
               <label className="whitespace-nowrap text-xs font-medium text-onyx-600">Au</label>
               <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-full rounded-lg border border-onyx-200 px-2.5 py-1.5 text-sm" />
             </div>
-            <div className="flex items-center whitespace-nowrap text-xs text-onyx-500">
+            <div className="flex items-center text-xs text-onyx-500">
               <Users size={14} className="mr-1.5" /> {clientsActifsPeriode} client(s) distinct(s)
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
+      <div className="grid gap-3 p-3 sm:gap-4 sm:p-5 lg:grid-cols-2">
         {/* Colonne gauche : clients déroulants */}
         <div className="rounded-xl border border-onyx-100">
           <div className="border-b border-onyx-100 px-4 py-3">
@@ -346,7 +346,7 @@ export function VentesSynthese() {
                     </div>
                   </button>
                   {ouvert && (
-                    <div className="grid grid-cols-2 gap-2 bg-onyx-50/50 px-10 pb-3 pt-1 text-xs sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-2 bg-onyx-50/50 px-4 pb-3 pt-1 text-xs sm:px-10 sm:grid-cols-4">
                       <div><p className="text-onyx-400">Achats</p><p className="font-semibold text-onyx-700">{fcfa(c.total_achats)}</p></div>
                       <div><p className="text-onyx-400">Payé</p><p className="font-semibold text-emerald-600">{fcfa(c.total_paye)}</p></div>
                       <div><p className="text-onyx-400">Dû</p><p className={`font-semibold ${c.total_du > 0 ? "text-red-600" : "text-onyx-500"}`}>{fcfa(Math.max(0, c.total_du))}</p></div>
