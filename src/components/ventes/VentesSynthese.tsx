@@ -211,7 +211,7 @@ export function VentesSynthese() {
   }, [supabase]);
 
   // La synthèse reste synchronisée avec les paiements et les ventes : une
-  // validation de paiement met donc immédiatement à jour le client et ses FAC.
+  // validation de paiement met donc immédiatement à jour le client et ses factures.
   useRealtimeRefresh(["ventes", "paiements_ventes"], load);
 
   useEffect(() => {
@@ -302,9 +302,9 @@ export function VentesSynthese() {
   }
 
   return (
-    <section className="mt-5 rounded-2xl border border-onyx-100 bg-white shadow-sm">
+    <section className="mt-5 flex h-[calc(100vh-7rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-onyx-100 bg-white shadow-sm">
       {/* Zone haute fixe : titre + indicateurs + période analysée */}
-      <div className="sticky top-0 z-30 rounded-t-2xl border-b border-onyx-100 bg-white/95 p-4 shadow-sm backdrop-blur sm:p-5">
+      <div className="shrink-0 rounded-t-2xl border-b border-onyx-100 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -361,13 +361,13 @@ export function VentesSynthese() {
         </div>
       </div>
 
-      <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.5fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-3 sm:p-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.5fr)]">
         <div className="min-w-0 rounded-xl border border-onyx-100 overflow-hidden flex min-h-0 flex-col">
-          <div className="sticky top-0 z-20 shrink-0 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+          <div className="shrink-0 border-b border-onyx-100 bg-white px-4 py-3 shadow-sm">
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
-            <p className="text-xs text-onyx-400">Cliquez sur un client pour ouvrir sa situation et afficher ses FAC.</p>
+            <p className="text-xs text-onyx-400">Cliquez sur un client pour ouvrir sa situation et afficher ses factures.</p>
           </div>
-          <div className="max-h-[560px] min-h-0 overflow-y-auto divide-y divide-onyx-50 overscroll-contain">
+          <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-onyx-50 overscroll-contain">
             {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
               const cle = c.client_nom.toLocaleLowerCase("fr-FR");
               const ouvert = clientOuvertNom === cle;
@@ -406,13 +406,13 @@ export function VentesSynthese() {
           </div>
         </div>
 
-        <div ref={facSectionRef} className="min-w-0 scroll-mt-4 rounded-xl border border-onyx-100 overflow-hidden flex min-h-0 flex-col">
-          <div className="sticky top-0 z-20 shrink-0 border-b border-onyx-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
-            <h3 className="text-sm font-semibold text-onyx-800">FAC du client sélectionné</h3>
+        <div ref={facSectionRef} className="min-w-0 min-h-0 rounded-xl border border-onyx-100 overflow-hidden flex flex-col">
+          <div className="shrink-0 border-b border-onyx-100 bg-white px-4 py-3 shadow-sm">
+            <h3 className="text-sm font-semibold text-onyx-800">FACTURE du client sélectionné</h3>
             <p className="text-xs text-onyx-400">Les factures de toutes les commandes liées au même nom de client sont regroupées ici.</p>
           </div>
           <div className="min-h-0">
-            {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses FAC.</p> : loadingFacs ? <p className="p-6 text-sm text-onyx-400">Chargement des factures du client...</p> : !facsClient.length ? <p className="p-6 text-sm text-onyx-400">Aucune facture enregistrée pour ce client.</p> : (() => {
+            {!clientSelectionneNom ? <p className="p-6 text-sm text-onyx-400">Sélectionnez un client dans la liste pour afficher ses factures.</p> : loadingFacs ? <p className="p-6 text-sm text-onyx-400">Chargement des factures du client...</p> : !facsClient.length ? <p className="p-6 text-sm text-onyx-400">Aucune facture enregistrée pour ce client.</p> : (() => {
               const facs = facsClient;
               return facs.map((v) => {
                 const ouvert = venteOuverteId === v.id;
