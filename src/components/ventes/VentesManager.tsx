@@ -844,6 +844,8 @@ function VenteDetail({
       prix_vente_reel: number;
       prix_vente_conseille_reference: number;
       montant_ligne: number;
+      designation_hors_catalogue: string | null;
+      hors_catalogue: boolean;
       articles: { designation: string } | null;
       emplacements: { nom: string } | null;
     }[]
