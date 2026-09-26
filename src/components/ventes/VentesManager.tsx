@@ -37,12 +37,14 @@ type ArticleOption = {
 };
 
 type LigneBrouillon = {
-  article_id: string;
+  article_id: string | null;
+  designation_hors_catalogue?: string | null;
+  hors_catalogue?: boolean;
   quantite: string;
   prix_vente_conseille_reference: string;
   prix_vente_reel: string;
   remise: string;
-  emplacement_id: string;
+  emplacement_id: string | null;
   conteneur_id: string;
 };
 
@@ -218,7 +220,7 @@ function NouvelleVente({
         supabase
           .from("lignes_ventes")
           .select(
-            "article_id, quantite, prix_vente_conseille_reference, prix_vente_reel, remise, emplacement_id, conteneur_id"
+            "article_id, designation_hors_catalogue, hors_catalogue, quantite, prix_vente_conseille_reference, prix_vente_reel, remise, emplacement_id, conteneur_id"
           )
           .eq("vente_id", editVenteId),
       ]).then(([venteRes, lignesRes]) => {
@@ -230,13 +232,15 @@ function NouvelleVente({
           setLignes(
             lignesRes.data.map((l) => ({
               article_id: l.article_id,
+              designation_hors_catalogue: l.designation_hors_catalogue ?? null,
+              hors_catalogue: Boolean(l.hors_catalogue),
               quantite: String(l.quantite),
               prix_vente_conseille_reference: String(
                 l.prix_vente_conseille_reference ?? ""
               ),
               prix_vente_reel: String(l.prix_vente_reel),
               remise: String(l.remise ?? "0"),
-              emplacement_id: l.emplacement_id,
+              emplacement_id: l.emplacement_id ?? null,
               conteneur_id: l.conteneur_id ?? "",
             }))
           );
@@ -252,6 +256,8 @@ function NouvelleVente({
       ...lignes,
       {
         article_id: "",
+        designation_hors_catalogue: null,
+        hors_catalogue: false,
         quantite: "1",
         prix_vente_conseille_reference: "",
         prix_vente_reel: "",
@@ -322,12 +328,12 @@ function NouvelleVente({
       return;
     }
     for (const l of lignes) {
-      if (!l.article_id || !l.quantite || Number(l.quantite) <= 0) {
-        setError("Chaque ligne doit avoir un article et une quantité valide.");
+      if ((!l.hors_catalogue && !l.article_id) || (l.hors_catalogue && !l.designation_hors_catalogue?.trim()) || !l.quantite || Number(l.quantite) <= 0) {
+        setError("Chaque ligne doit avoir un article (ou une désignation hors catalogue) et une quantité valide.");
         return;
       }
-      if (!l.emplacement_id) {
-        setError("Chaque ligne doit avoir un emplacement de sortie.");
+      if (!l.hors_catalogue && !l.emplacement_id) {
+        setError("Chaque ligne d'article du catalogue doit avoir un emplacement de sortie.");
         return;
       }
     }
@@ -424,8 +430,10 @@ function NouvelleVente({
     const { error: lignesError } = await supabase.from("lignes_ventes").insert(
       lignes.map((l) => ({
         vente_id: venteId,
-        article_id: l.article_id,
-        emplacement_id: l.emplacement_id,
+        article_id: l.hors_catalogue ? null : l.article_id,
+        emplacement_id: l.hors_catalogue ? null : l.emplacement_id,
+        designation_hors_catalogue: l.hors_catalogue ? l.designation_hors_catalogue?.trim() : null,
+        hors_catalogue: Boolean(l.hors_catalogue),
         quantite: Number(l.quantite),
         // Colonne historique héritée de l'ancien système de marge, non
         // utilisée par le nouveau modèle (prix de vente entièrement
@@ -519,8 +527,17 @@ function NouvelleVente({
                         <label className="mb-1 block text-xs font-medium text-onyx-500">
                           Article
                         </label>
+                        {l.hors_catalogue ? (
+                          <input
+                            value={l.designation_hors_catalogue ?? ""}
+                            onChange={(e) => majLigne(i, { designation_hors_catalogue: e.target.value })}
+                            required
+                            className="w-full rounded-md border border-accent-200 bg-accent-50 px-2.5 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
+                            placeholder="Désignation hors catalogue"
+                          />
+                        ) : (
                         <select
-                          value={l.article_id}
+                          value={l.article_id ?? ""}
                           onChange={(e) => choisirArticle(i, e.target.value)}
                           required
                           className="w-full rounded-md border border-onyx-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
@@ -532,6 +549,8 @@ function NouvelleVente({
                             </option>
                           ))}
                         </select>
+                        )}
+                        {l.hors_catalogue && <p className="mt-0.5 text-[11px] font-medium text-accent-700">Article hors catalogue · aucun stock</p>}
                       </div>
 
                       <div className="sm:col-span-1">
@@ -604,6 +623,9 @@ function NouvelleVente({
                         <label className="mb-1 block text-xs font-medium text-onyx-500">
                           Emplacement (sortie)
                         </label>
+                        {l.hors_catalogue ? (
+                          <div className="rounded-md border border-accent-100 bg-accent-50 px-2.5 py-2 text-sm text-accent-700">Aucun emplacement — vente hors catalogue</div>
+                        ) : (
                         <select
                           value={l.emplacement_id}
                           onChange={(e) =>
@@ -625,7 +647,8 @@ function NouvelleVente({
                             );
                           })}
                         </select>
-                        {l.article_id && l.emplacement_id && (
+                        )}
+                        {!l.hors_catalogue && l.article_id && l.emplacement_id && (
                           <p
                             className={`mt-0.5 text-[11px] ${
                               quantiteDisponible(l.article_id, l.emplacement_id) <
@@ -652,17 +675,19 @@ function NouvelleVente({
                       </div>
                     </div>
 
-                    <div className="mt-2">
-                      <ConteneurLigneSelect
-                        articleId={l.article_id}
-                        emplacementId={l.emplacement_id}
-                        value={l.conteneur_id}
-                        onChange={(conteneurId) => majLigne(i, { conteneur_id: conteneurId })}
-                      />
-                    </div>
+                    {!l.hors_catalogue && (
+                      <div className="mt-2">
+                        <ConteneurLigneSelect
+                          articleId={l.article_id ?? ""}
+                          emplacementId={l.emplacement_id ?? ""}
+                          value={l.conteneur_id}
+                          onChange={(conteneurId) => majLigne(i, { conteneur_id: conteneurId })}
+                        />
+                      </div>
+                    )}
 
                     <p className="mt-1.5 text-xs text-onyx-400">
-                      {designationDe(l.article_id)} · Sous-total :{" "}
+                      {l.hors_catalogue ? (l.designation_hors_catalogue || "Article hors catalogue") : designationDe(l.article_id ?? "")} · Sous-total :{" "}
                       <span className="font-medium text-onyx-600">
                         {sousTotal.toLocaleString("fr-FR")} FCFA
                       </span>
@@ -864,7 +889,7 @@ function VenteDetail({
       supabase
         .from("lignes_ventes")
         .select(
-          "id, quantite, prix_vente_reel, prix_vente_conseille_reference, montant_ligne, articles(designation), emplacements(nom)"
+          "id, quantite, prix_vente_reel, prix_vente_conseille_reference, montant_ligne, designation_hors_catalogue, hors_catalogue, articles(designation), emplacements(nom)"
         )
         .eq("vente_id", venteId),
       supabase
@@ -1186,7 +1211,7 @@ function VenteDetail({
             {lignes.map((l) => (
               <tr key={l.id} className="border-b border-onyx-50 last:border-0">
                 <td className="px-4 py-2.5 font-medium text-onyx-800">
-                  {l.articles?.designation}
+                  {l.hors_catalogue ? (l.designation_hors_catalogue || "Article hors catalogue") : (l.articles?.designation || "Article enregistré")}
                 </td>
                 <td className="px-4 py-2.5 text-right text-onyx-500">
                   {l.quantite}
@@ -1203,7 +1228,7 @@ function VenteDetail({
                   {l.montant_ligne.toLocaleString("fr-FR")}
                 </td>
                 <td className="px-4 py-2.5 text-onyx-500">
-                  {l.emplacements?.nom}
+                  {l.hors_catalogue ? "—" : (l.emplacements?.nom || "—")}
                 </td>
               </tr>
             ))}

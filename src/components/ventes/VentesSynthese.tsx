@@ -44,6 +44,8 @@ type LigneCommande = {
   remise: number;
   articles: { designation: string }[] | null;
   emplacements: { nom: string }[] | null;
+  designation_hors_catalogue: string | null;
+  hors_catalogue: boolean;
 };
 
 function debutMoisCourant() {
@@ -226,7 +228,7 @@ export function VentesSynthese() {
       const [lignesRes, paiementsRes] = await Promise.all([
         supabase
           .from("lignes_ventes")
-          .select("id, quantite, prix_vente_reel, remise, articles(designation), emplacements(nom)")
+          .select("id, quantite, prix_vente_reel, remise, designation_hors_catalogue, hors_catalogue, articles(designation), emplacements(nom)")
           .eq("vente_id", venteOuverteId),
         supabase
           .from("paiements_ventes")
@@ -446,7 +448,7 @@ export function VentesSynthese() {
                             <div className="divide-y divide-onyx-50">
                               {lignesCommande.map((ligne) => {
                                 const prix = Number(ligne.prix_vente_reel) || 0; const quantite = Number(ligne.quantite) || 0; const remise = Number(ligne.remise) || 0; const sousTotal = Math.max(0, quantite * prix - remise);
-                                return <div key={ligne.id} className="px-3 py-2.5 text-xs"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium text-onyx-800">{ligne.articles?.[0]?.designation || "Article enregistré"}</p><p className="mt-0.5 break-words text-[11px] text-onyx-400">Qté {quantite} × {fcfa(prix)}{ligne.emplacements?.[0]?.nom ? ` · ${ligne.emplacements[0].nom}` : ""}{remise > 0 ? ` · remise ${fcfa(remise)}` : ""}</p></div><p className="shrink-0 font-semibold text-onyx-800">{fcfa(sousTotal)}</p></div></div>;
+                                return <div key={ligne.id} className="px-3 py-2.5 text-xs"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-medium text-onyx-800">{ligne.hors_catalogue ? (ligne.designation_hors_catalogue || "Article hors catalogue") : (ligne.articles?.[0]?.designation || "Article enregistré")}</p><p className="mt-0.5 break-words text-[11px] text-onyx-400">Qté {quantite} × {fcfa(prix)}{ligne.emplacements?.[0]?.nom ? ` · ${ligne.emplacements[0].nom}` : ""}{remise > 0 ? ` · remise ${fcfa(remise)}` : ""}</p></div><p className="shrink-0 font-semibold text-onyx-800">{fcfa(sousTotal)}</p></div></div>;
                               })}
                             </div>
                           )}

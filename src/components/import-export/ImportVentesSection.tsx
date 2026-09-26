@@ -63,11 +63,12 @@ type CorrespondanceArticle = {
 };
 
 type LigneResolue = {
-  article_id: string;
+  article_id: string | null;
   designation: string;
-  emplacement_id: string;
+  emplacement_id: string | null;
   quantite: number;
   prix: number;
+  hors_catalogue?: boolean;
 };
 
 type VerificationLigne = {
@@ -87,6 +88,7 @@ type VerificationLigne = {
   prix: number;
   erreur: string | null;
   besoinCorrection: boolean;
+  horsCatalogue: boolean;
 };
 
 type GroupeVente = {
@@ -107,6 +109,7 @@ type CorrectionsLigne = {
   articleDesignation?: string;
   quantite?: number;
   emplacementId?: string;
+  horsCatalogue?: boolean;
 };
 
 function distanceLevenshtein(a: string, b: string): number {
@@ -228,6 +231,7 @@ export function ImportVentesSection() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const correctionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [clients, setClients] = useState<{ id: string; nom: string }[]>([]);
   const [articles, setArticles] = useState<ArticleImport[]>([]);
@@ -355,8 +359,6 @@ export function ImportVentesSection() {
     setErreurGenerale(null);
     try {
       const refs = articles.length > 0 ? { articles, stocks } : await chargerDonneesReference();
-      if (refs.articles.length === 0) throw new Error("Aucun article n'est enregistré dans le stock/catalogue.");
-
       const stockParCle = new Map<string, number>();
       for (const stock of refs.stocks) {
         const cle = `${stock.article_id}|${stock.emplacement_id}`;
@@ -411,8 +413,9 @@ export function ImportVentesSection() {
                 : null, suggestions: [] }
             : trouverArticle(designationRecherchee, refs.articles);
 
-          const article = rechercheArticle.correspondance?.article ?? null;
-          const articleType = rechercheArticle.correspondance?.type ?? null;
+          const horsCatalogue = correction.horsCatalogue === true;
+          const article = horsCatalogue ? null : rechercheArticle.correspondance?.article ?? null;
+          const articleType = horsCatalogue ? null : rechercheArticle.correspondance?.type ?? null;
           const stocksArticle = article
             ? emplacements.map((emplacement) => ({
                 id: emplacement.id,
@@ -426,7 +429,16 @@ export function ImportVentesSection() {
           let disponible = 0;
           let erreur: string | null = null;
 
-          if (!article) {
+          if (horsCatalogue) {
+            emplacementId = null;
+            emplacementNom = null;
+            disponible = 0;
+            if (!articleSaisi) {
+              erreur = "Désignation de l'article hors catalogue manquante.";
+            } else if (!Number.isFinite(quantite) || quantite <= 0) {
+              erreur = "Quantité invalide : indiquez une quantité supérieure à 0.";
+            }
+          } else if (!article) {
             erreur = articleSaisi
               ? `Article « ${articleSaisi} » à confirmer : aucune correspondance suffisamment sûre.`
               : "Désignation de l'article manquante.";
@@ -459,9 +471,9 @@ export function ImportVentesSection() {
 
           const besoinCorrection = Boolean(
             erreur ||
-            !article ||
+            (!horsCatalogue && !article) ||
             articleType === "approx" ||
-            (article && !modeHistorique && (!emplacementId || disponible < quantite)),
+            (!horsCatalogue && article && !modeHistorique && (!emplacementId || disponible < quantite)),
           );
 
           const verification: VerificationLigne = {
@@ -481,16 +493,18 @@ export function ImportVentesSection() {
             prix,
             erreur,
             besoinCorrection,
+            horsCatalogue,
           };
           verifications.push(verification);
 
-          if (!erreur && article && emplacementId) {
+          if (!erreur && ((article && emplacementId) || horsCatalogue)) {
             lignesResolues.push({
-              article_id: article.id,
-              designation: article.designation,
-              emplacement_id: emplacementId,
+              article_id: article?.id ?? null,
+              designation: horsCatalogue ? articleSaisi : article!.designation,
+              emplacement_id: horsCatalogue ? null : emplacementId,
               quantite,
               prix,
+              hors_catalogue: horsCatalogue,
             });
             if (!modeHistorique) {
               const cleStock = `${article.id}|${emplacementId}`;
@@ -502,7 +516,7 @@ export function ImportVentesSection() {
         const lignesAvecErreur = verifications.filter((v) => v.erreur);
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
         let doublonProbable = false;
-        if (nomClient && dateVente && montantTotal > 0) {
+        if (lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length && nomClient && dateVente && montantTotal > 0) {
           const clientExistant = clients.find(
             (c) => normaliserDesignation(c.nom) === normaliserDesignation(nomClient),
           ) ?? clients
@@ -532,7 +546,6 @@ export function ImportVentesSection() {
           montantTotal,
           erreurs: [...erreurs, ...lignesAvecErreur.map((v) => v.erreur!).filter(Boolean)],
           doublonProbable,
-          // Une vente détectée comme doublon est bloquée : elle ne peut pas être importée.
           valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length && !doublonProbable,
         });
       }
@@ -542,7 +555,7 @@ export function ImportVentesSection() {
       setGroupes(resultats);
       setClientOuverts((precedentes) => {
         const next = { ...precedentes };
-        for (const groupe of resultats) next[groupe.nomClient || "Sans client"] = true;
+        for (const groupe of resultats) next[cleClient(groupe.nomClient)] = true;
         return next;
       });
     } catch (err) {
@@ -594,16 +607,27 @@ export function ImportVentesSection() {
     }));
   }
 
-  async function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
+  function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
+    const cle = cleLigne(numero, ligneIndex);
     const next = {
       ...corrections,
-      [cleLigne(numero, ligneIndex)]: {
-        ...corrections[cleLigne(numero, ligneIndex)],
+      [cle]: {
+        ...corrections[cle],
         ...patch,
       },
     };
     setCorrections(next);
-    if (lignesBrutesCourantes.length > 0) await analyser(lignesBrutesCourantes, next);
+
+    // Une correction ne doit pas relancer immédiatement l'analyse complète
+    // du fichier. Plusieurs contrôles peuvent être corrigés à la suite ; on
+    // attend brièvement la fin de la saisie pour ne lancer qu'une seule
+    // analyse avec toutes les corrections cumulées.
+    if (correctionTimerRef.current) clearTimeout(correctionTimerRef.current);
+    if (lignesBrutesCourantes.length === 0) return;
+    setAnalyse(true);
+    correctionTimerRef.current = setTimeout(() => {
+      void analyser(lignesBrutesCourantes, next);
+    }, 160);
   }
 
   async function confirmerImport() {
@@ -664,6 +688,8 @@ export function ImportVentesSection() {
           vente_id: vente.id,
           article_id: l.article_id,
           emplacement_id: l.emplacement_id,
+          designation_hors_catalogue: l.hors_catalogue ? l.designation : null,
+          hors_catalogue: Boolean(l.hors_catalogue),
           quantite: l.quantite,
           prix_achat_reference: 0,
           prix_vente_conseille_reference: l.prix,
@@ -768,14 +794,22 @@ export function ImportVentesSection() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  function cleClient(nom: string) {
+    return normaliserDesignation(nom) || "sans client";
+  }
+
   function groupeParClient() {
-    const groupesClients = new Map<string, GroupeVente[]>();
+    const groupesClients = new Map<string, { nom: string; groupes: GroupeVente[] }>();
     for (const groupe of groupes) {
-      const cle = groupe.nomClient || "Sans client";
-      if (!groupesClients.has(cle)) groupesClients.set(cle, []);
-      groupesClients.get(cle)!.push(groupe);
+      const cle = cleClient(groupe.nomClient);
+      const existant = groupesClients.get(cle);
+      if (existant) {
+        existant.groupes.push(groupe);
+      } else {
+        groupesClients.set(cle, { nom: groupe.nomClient || "Sans client", groupes: [groupe] });
+      }
     }
-    return Array.from(groupesClients.entries());
+    return Array.from(groupesClients.values()).map(({ nom, groupes: groupesDuClient }) => [nom, groupesDuClient] as [string, GroupeVente[]]);
   }
 
   const nbValides = groupes.filter((g) => g.valide).length;
@@ -797,7 +831,11 @@ export function ImportVentesSection() {
               <span className="rounded-md bg-onyx-100 px-2 py-1 text-[11px] font-semibold text-onyx-500">
                 Ligne {verification.ligneIndex + 1}
               </span>
-              {articleExactEtStockOK ? (
+              {verification.horsCatalogue ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-accent-100 px-2 py-1 text-[11px] font-semibold text-accent-700">
+                  Article hors catalogue
+                </span>
+              ) : articleExactEtStockOK ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
                   <PackageCheck size={12} /> Correspondance exacte · stock disponible
                 </span>
@@ -844,7 +882,12 @@ export function ImportVentesSection() {
                 </label>
               )}
 
-              {articleExactEtStockOK ? (
+              {verification.horsCatalogue ? (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-onyx-400">Emplacement</p>
+                  <p className="mt-1 text-sm font-medium text-accent-700">Hors catalogue · aucun stock</p>
+                </div>
+              ) : articleExactEtStockOK ? (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-onyx-400">Emplacement</p>
                   <p className="mt-1 flex items-center gap-1 text-sm font-medium text-onyx-800"><MapPin size={13} /> {verification.emplacementNom}</p>
@@ -907,13 +950,34 @@ export function ImportVentesSection() {
                   ))}
                 </div>
               )}
+              {!verification.article && !verification.horsCatalogue && verification.articleSaisi.trim() && (
+                <button
+                  type="button"
+                  onClick={() => void appliquerCorrection(groupe.numero, verification.ligneIndex, {
+                    horsCatalogue: true,
+                    articleId: undefined,
+                    articleDesignation: verification.articleSaisi,
+                    emplacementId: undefined,
+                  })}
+                  className="mt-2 inline-flex items-center rounded-md border border-accent-200 bg-accent-50 px-3 py-2 text-xs font-semibold text-accent-700 hover:bg-accent-100"
+                >
+                  Utiliser comme article hors catalogue
+                </button>
+              )}
+              {verification.horsCatalogue && (
+                <div className="mt-2 rounded-md border border-accent-100 bg-accent-50 px-3 py-2 text-xs text-accent-700">
+                  Article hors catalogue : enregistré dans la facture sans ajout au catalogue et sans mouvement de stock.
+                </div>
+              )}
             </div>
 
             <div>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-onyx-400">
                 <MapPin size={11} /> Stock disponible par emplacement
               </div>
-              {!verification.article ? (
+              {verification.horsCatalogue ? (
+                <p className="rounded-md bg-accent-50 px-3 py-2 text-xs text-accent-700">Aucun emplacement ni stock ne sont requis pour un article hors catalogue.</p>
+              ) : !verification.article ? (
                 <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d&apos;abord l&apos;article correspondant pour afficher son stock par emplacement.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -1016,13 +1080,14 @@ export function ImportVentesSection() {
 
           <div className="mt-3 space-y-4">
             {groupeParClient().map(([client, ventesClient]) => {
-              const ouvert = clientOuverts[client] !== false;
+              const clientKey = cleClient(client);
+              const ouvert = clientOuverts[clientKey] !== false;
               const validesClient = ventesClient.filter((g) => g.valide).length;
               return (
                 <section key={client} className="overflow-hidden rounded-xl border border-onyx-100">
                   <button
                     type="button"
-                    onClick={() => setClientOuverts((p) => ({ ...p, [client]: !ouvert }))}
+                    onClick={() => setClientOuverts((p) => ({ ...p, [clientKey]: !ouvert }))}
                     className="flex w-full items-center justify-between gap-3 bg-onyx-50 px-4 py-3 text-left hover:bg-onyx-100/70"
                   >
                     <div className="flex min-w-0 items-center gap-2">
@@ -1043,9 +1108,7 @@ export function ImportVentesSection() {
                               <span className="text-sm font-semibold text-onyx-800">BL {groupe.numero}</span>
                               <span className="ml-2 text-xs text-onyx-400">{groupe.dateVente ?? "Date non renseignée"}</span>
                             </div>
-                            {groupe.doublonProbable ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-700"><AlertCircle size={12} /> Doublon bloqué</span>
-                            ) : groupe.valide ? (
+                            {groupe.valide ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 size={12} /> Prête à importer</span>
                             ) : (
                               <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700"><AlertCircle size={12} /> Correction nécessaire</span>
@@ -1057,8 +1120,8 @@ export function ImportVentesSection() {
                           </div>
 
                           {groupe.doublonProbable && (
-                            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
-                              <AlertCircle size={13} className="mr-1 inline" /> Doublon détecté : une vente existe déjà pour ce client, cette date et ce montant. Cette commande est bloquée et ne pourra pas être importée.
+                            <div className="mt-3 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                              <AlertCircle size={13} className="mr-1 inline" /> Doublon possible : une vente similaire existe déjà pour ce client, cette date et ce montant.
                             </div>
                           )}
                         </div>
@@ -1071,7 +1134,7 @@ export function ImportVentesSection() {
           </div>
 
           <div className="mt-4">
-            <PrimaryButton onClick={confirmerImport} loading={importing} disabled={nbValides === 0}>
+            <PrimaryButton onClick={confirmerImport} loading={importing} disabled={nbValides === 0 || analyse}>
               Importer {nbValides} vente{nbValides > 1 ? "s" : ""}
             </PrimaryButton>
             {importing && progression.total > 0 && (
