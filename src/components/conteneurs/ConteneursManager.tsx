@@ -1443,7 +1443,7 @@ function ConteneurDetail({
       )}
 
       {montantDefini ? (
-        <div className="mt-5 grid grid-cols-3 gap-3">
+        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-onyx-100 bg-white p-4 text-center">
             <p className="text-lg font-semibold text-onyx-900">
               {conteneur.montant_achat_global!.toLocaleString("fr-FR")}

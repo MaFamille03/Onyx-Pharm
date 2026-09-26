@@ -65,7 +65,7 @@ export function VenteInfoPanel({ id }: { id: string }) {
             {new Date(vente.date_vente).toLocaleDateString("fr-FR")}
           </p>
 
-          <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-lg bg-onyx-50 p-3 text-center">
               <p className="text-lg font-semibold text-onyx-900">
                 {vente.montant_total.toLocaleString("fr-FR")}
