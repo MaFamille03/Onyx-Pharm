@@ -235,7 +235,6 @@ export function ImportVentesSection() {
   const [groupes, setGroupes] = useState<GroupeVente[]>([]);
   const [lignesBrutesCourantes, setLignesBrutesCourantes] = useState<LigneBrute[]>([]);
   const [corrections, setCorrections] = useState<Record<string, CorrectionsLigne>>({});
-  const correctionsRef = useRef<Record<string, CorrectionsLigne>>({});
   const [analyse, setAnalyse] = useState(false);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -351,22 +350,6 @@ export function ImportVentesSection() {
     };
   }
 
-  function cleClient(nom: string): string {
-    return normaliserDesignation(nom).replace(/[^a-z0-9]+/g, "");
-  }
-
-  function nomClientCanonique(nomSaisi: string): string {
-    const nom = String(nomSaisi ?? "").trim();
-    if (!nom) return "";
-    const exact = clients.find((client) => normaliserDesignation(client.nom) === normaliserDesignation(nom));
-    if (exact) return exact.nom;
-    const proche = clients
-      .map((client) => ({ client, score: similariteTexte(nom, client.nom) }))
-      .filter((item) => item.score >= 0.78)
-      .sort((a, b) => b.score - a.score)[0];
-    return proche?.client.nom ?? nom;
-  }
-
   async function analyser(brutes: LigneBrute[], correctionsActuelles: Record<string, CorrectionsLigne>) {
     setAnalyse(true);
     setErreurGenerale(null);
@@ -407,7 +390,7 @@ export function ImportVentesSection() {
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ».`);
         }
-        const nomClient = nomClientCanonique(String(premiere.Client ?? "").trim());
+        const nomClient = String(premiere.Client ?? "").trim();
         const verifications: VerificationLigne[] = [];
         const lignesResolues: LigneResolue[] = [];
 
@@ -424,7 +407,7 @@ export function ImportVentesSection() {
 
           const rechercheArticle = correction.articleId
             ? { correspondance: refs.articles.find((a) => a.id === correction.articleId)
-                ? { article: refs.articles.find((a) => a.id === correction.articleId)!, type: "exact" as const, score: 1 }
+                ? { article: refs.articles.find((a) => a.id === correction.articleId)!, type: "approx" as const, score: 1 }
                 : null, suggestions: [] }
             : trouverArticle(designationRecherchee, refs.articles);
 
@@ -549,7 +532,8 @@ export function ImportVentesSection() {
           montantTotal,
           erreurs: [...erreurs, ...lignesAvecErreur.map((v) => v.erreur!).filter(Boolean)],
           doublonProbable,
-          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length,
+          // Une vente détectée comme doublon est bloquée : elle ne peut pas être importée.
+          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length && !doublonProbable,
         });
       }
 
@@ -604,26 +588,20 @@ export function ImportVentesSection() {
 
   function modifierLigne(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
     const cle = cleLigne(numero, ligneIndex);
-    setCorrections((precedentes) => {
-      const next = {
-        ...precedentes,
-        [cle]: { ...precedentes[cle], ...patch },
-      };
-      correctionsRef.current = next;
-      return next;
-    });
+    setCorrections((precedentes) => ({
+      ...precedentes,
+      [cle]: { ...precedentes[cle], ...patch },
+    }));
   }
 
   async function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
-    const cle = cleLigne(numero, ligneIndex);
     const next = {
-      ...correctionsRef.current,
-      [cle]: {
-        ...correctionsRef.current[cle],
+      ...corrections,
+      [cleLigne(numero, ligneIndex)]: {
+        ...corrections[cleLigne(numero, ligneIndex)],
         ...patch,
       },
     };
-    correctionsRef.current = next;
     setCorrections(next);
     if (lignesBrutesCourantes.length > 0) await analyser(lignesBrutesCourantes, next);
   }
@@ -649,20 +627,10 @@ export function ImportVentesSection() {
 
       let clientId: string | null = null;
       if (groupe.nomClient) {
-        const clientCanonique = clientsTravail.find(
-          (client) => normaliserDesignation(client.nom) === normaliserDesignation(groupe.nomClient),
-        ) ?? clientsTravail
-          .map((client) => ({ client, score: similariteTexte(groupe.nomClient, client.nom) }))
-          .filter((item) => item.score >= 0.78)
-          .sort((a, b) => b.score - a.score)[0]?.client;
-        if (clientCanonique) {
-          clientId = clientCanonique.id;
-        } else {
-          clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
+        clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
           const { data } = await supabase.from("clients").insert({ nom: nomSaisi }).select("id, nom").single();
           return data;
         });
-        }
       }
 
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
@@ -797,23 +765,17 @@ export function ImportVentesSection() {
     setGroupes([]);
     setLignesBrutesCourantes([]);
     setCorrections({});
-    correctionsRef.current = {};
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function groupeParClient() {
-    const groupesClients = new Map<string, { nom: string; ventes: GroupeVente[] }>();
+    const groupesClients = new Map<string, GroupeVente[]>();
     for (const groupe of groupes) {
-      const nom = groupe.nomClient || "Sans client";
-      const cle = cleClient(nom) || "sansclient";
-      const existant = groupesClients.get(cle);
-      if (existant) {
-        existant.ventes.push(groupe);
-      } else {
-        groupesClients.set(cle, { nom, ventes: [groupe] });
-      }
+      const cle = groupe.nomClient || "Sans client";
+      if (!groupesClients.has(cle)) groupesClients.set(cle, []);
+      groupesClients.get(cle)!.push(groupe);
     }
-    return Array.from(groupesClients.values()).map((item) => [item.nom, item.ventes] as const);
+    return Array.from(groupesClients.entries());
   }
 
   const nbValides = groupes.filter((g) => g.valide).length;
@@ -1081,7 +1043,9 @@ export function ImportVentesSection() {
                               <span className="text-sm font-semibold text-onyx-800">BL {groupe.numero}</span>
                               <span className="ml-2 text-xs text-onyx-400">{groupe.dateVente ?? "Date non renseignée"}</span>
                             </div>
-                            {groupe.valide ? (
+                            {groupe.doublonProbable ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-700"><AlertCircle size={12} /> Doublon bloqué</span>
+                            ) : groupe.valide ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 size={12} /> Prête à importer</span>
                             ) : (
                               <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700"><AlertCircle size={12} /> Correction nécessaire</span>
@@ -1093,8 +1057,8 @@ export function ImportVentesSection() {
                           </div>
 
                           {groupe.doublonProbable && (
-                            <div className="mt-3 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                              <AlertCircle size={13} className="mr-1 inline" /> Doublon possible : une vente similaire existe déjà pour ce client, cette date et ce montant.
+                            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                              <AlertCircle size={13} className="mr-1 inline" /> Doublon détecté : une vente existe déjà pour ce client, cette date et ce montant. Cette commande est bloquée et ne pourra pas être importée.
                             </div>
                           )}
                         </div>
