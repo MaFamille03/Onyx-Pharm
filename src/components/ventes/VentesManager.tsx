@@ -627,7 +627,7 @@ function NouvelleVente({
                           <div className="rounded-md border border-accent-100 bg-accent-50 px-2.5 py-2 text-sm text-accent-700">Aucun emplacement — vente hors catalogue</div>
                         ) : (
                         <select
-                          value={l.emplacement_id}
+                          value={l.emplacement_id ?? ""}
                           onChange={(e) =>
                             majLigne(i, { emplacement_id: e.target.value })
                           }
