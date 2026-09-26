@@ -235,6 +235,7 @@ export function ImportVentesSection() {
   const [groupes, setGroupes] = useState<GroupeVente[]>([]);
   const [lignesBrutesCourantes, setLignesBrutesCourantes] = useState<LigneBrute[]>([]);
   const [corrections, setCorrections] = useState<Record<string, CorrectionsLigne>>({});
+  const correctionsRef = useRef<Record<string, CorrectionsLigne>>({});
   const [analyse, setAnalyse] = useState(false);
   const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -350,6 +351,22 @@ export function ImportVentesSection() {
     };
   }
 
+  function cleClient(nom: string): string {
+    return normaliserDesignation(nom).replace(/[^a-z0-9]+/g, "");
+  }
+
+  function nomClientCanonique(nomSaisi: string): string {
+    const nom = String(nomSaisi ?? "").trim();
+    if (!nom) return "";
+    const exact = clients.find((client) => normaliserDesignation(client.nom) === normaliserDesignation(nom));
+    if (exact) return exact.nom;
+    const proche = clients
+      .map((client) => ({ client, score: similariteTexte(nom, client.nom) }))
+      .filter((item) => item.score >= 0.78)
+      .sort((a, b) => b.score - a.score)[0];
+    return proche?.client.nom ?? nom;
+  }
+
   async function analyser(brutes: LigneBrute[], correctionsActuelles: Record<string, CorrectionsLigne>) {
     setAnalyse(true);
     setErreurGenerale(null);
@@ -390,7 +407,7 @@ export function ImportVentesSection() {
         if (valeurDateVente !== undefined && valeurDateVente !== null && String(valeurDateVente).trim() !== "" && !dateVente) {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ».`);
         }
-        const nomClient = String(premiere.Client ?? "").trim();
+        const nomClient = nomClientCanonique(String(premiere.Client ?? "").trim());
         const verifications: VerificationLigne[] = [];
         const lignesResolues: LigneResolue[] = [];
 
@@ -407,7 +424,7 @@ export function ImportVentesSection() {
 
           const rechercheArticle = correction.articleId
             ? { correspondance: refs.articles.find((a) => a.id === correction.articleId)
-                ? { article: refs.articles.find((a) => a.id === correction.articleId)!, type: "approx" as const, score: 1 }
+                ? { article: refs.articles.find((a) => a.id === correction.articleId)!, type: "exact" as const, score: 1 }
                 : null, suggestions: [] }
             : trouverArticle(designationRecherchee, refs.articles);
 
@@ -587,20 +604,26 @@ export function ImportVentesSection() {
 
   function modifierLigne(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
     const cle = cleLigne(numero, ligneIndex);
-    setCorrections((precedentes) => ({
-      ...precedentes,
-      [cle]: { ...precedentes[cle], ...patch },
-    }));
+    setCorrections((precedentes) => {
+      const next = {
+        ...precedentes,
+        [cle]: { ...precedentes[cle], ...patch },
+      };
+      correctionsRef.current = next;
+      return next;
+    });
   }
 
   async function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
+    const cle = cleLigne(numero, ligneIndex);
     const next = {
-      ...corrections,
-      [cleLigne(numero, ligneIndex)]: {
-        ...corrections[cleLigne(numero, ligneIndex)],
+      ...correctionsRef.current,
+      [cle]: {
+        ...correctionsRef.current[cle],
         ...patch,
       },
     };
+    correctionsRef.current = next;
     setCorrections(next);
     if (lignesBrutesCourantes.length > 0) await analyser(lignesBrutesCourantes, next);
   }
@@ -626,10 +649,20 @@ export function ImportVentesSection() {
 
       let clientId: string | null = null;
       if (groupe.nomClient) {
-        clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
+        const clientCanonique = clientsTravail.find(
+          (client) => normaliserDesignation(client.nom) === normaliserDesignation(groupe.nomClient),
+        ) ?? clientsTravail
+          .map((client) => ({ client, score: similariteTexte(groupe.nomClient, client.nom) }))
+          .filter((item) => item.score >= 0.78)
+          .sort((a, b) => b.score - a.score)[0]?.client;
+        if (clientCanonique) {
+          clientId = clientCanonique.id;
+        } else {
+          clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
           const { data } = await supabase.from("clients").insert({ nom: nomSaisi }).select("id, nom").single();
           return data;
         });
+        }
       }
 
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
@@ -764,17 +797,23 @@ export function ImportVentesSection() {
     setGroupes([]);
     setLignesBrutesCourantes([]);
     setCorrections({});
+    correctionsRef.current = {};
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function groupeParClient() {
-    const groupesClients = new Map<string, GroupeVente[]>();
+    const groupesClients = new Map<string, { nom: string; ventes: GroupeVente[] }>();
     for (const groupe of groupes) {
-      const cle = groupe.nomClient || "Sans client";
-      if (!groupesClients.has(cle)) groupesClients.set(cle, []);
-      groupesClients.get(cle)!.push(groupe);
+      const nom = groupe.nomClient || "Sans client";
+      const cle = cleClient(nom) || "sansclient";
+      const existant = groupesClients.get(cle);
+      if (existant) {
+        existant.ventes.push(groupe);
+      } else {
+        groupesClients.set(cle, { nom, ventes: [groupe] });
+      }
     }
-    return Array.from(groupesClients.entries());
+    return Array.from(groupesClients.values()).map((item) => [item.nom, item.ventes] as const);
   }
 
   const nbValides = groupes.filter((g) => g.valide).length;
