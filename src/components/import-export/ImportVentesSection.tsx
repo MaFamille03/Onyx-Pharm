@@ -130,8 +130,12 @@ function distanceLevenshtein(a: string, b: string): number {
 
 function normaliserDesignation(texte: string): string {
   return normaliser(texte)
+    .replace(/[\u2010-\u2015\-_/\\,;:()\[\]{}]+/g, " ")
+    .replace(/[^a-z0-9\s]/gi, " ")
     .replace(/([a-z])([0-9])/g, "$1 $2")
-    .replace(/([0-9])([a-z])/g, "$1 $2");
+    .replace(/([0-9])([a-z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function similariteTexte(a: string, b: string): number {
@@ -232,6 +236,7 @@ export function ImportVentesSection() {
   const supabase = createClient();
   const { emplacements } = useReferenceData();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const correctionsRef = useRef<Record<string, CorrectionsLigne>>({});
 
   const [clients, setClients] = useState<{ id: string; nom: string }[]>([]);
   const [articles, setArticles] = useState<ArticleImport[]>([]);
@@ -397,11 +402,16 @@ export function ImportVentesSection() {
           const article = horsCatalogue ? null : (rechercheArticle.correspondance?.article ?? null);
           const articleType = rechercheArticle.correspondance?.type ?? null;
           const stocksArticle = article
-            ? emplacements.map((emplacement) => ({
-                id: emplacement.id,
-                nom: emplacement.nom,
-                quantite: stockParCle.get(`${article.id}|${emplacement.id}`) ?? 0,
-              }))
+            ? emplacements.map((emplacement) => {
+                const cleStock = `${article.id}|${emplacement.id}`;
+                const stockReel = stockParCle.get(cleStock) ?? 0;
+                const dejaReserve = quantitesReservees.get(cleStock) ?? 0;
+                return {
+                  id: emplacement.id,
+                  nom: emplacement.nom,
+                  quantite: Math.max(0, stockReel - dejaReserve),
+                };
+              })
             : [];
 
           let emplacementId: string | null = correction.emplacementId ?? null;
@@ -427,20 +437,18 @@ export function ImportVentesSection() {
             }
             if (!emplacementId && modeHistorique) emplacementId = emplacements[0]?.id ?? null;
             emplacementNom = emplacements.find((e) => e.id === emplacementId)?.nom ?? null;
-            disponible = emplacementId ? stockParCle.get(`${article.id}|${emplacementId}`) ?? 0 : 0;
+            disponible = emplacementId
+              ? stocksArticle.find((stock) => stock.id === emplacementId)?.quantite ?? 0
+              : 0;
 
             if (!Number.isFinite(quantite) || quantite <= 0) {
               erreur = "Quantité invalide : indiquez une quantité supérieure à 0.";
             } else if (!modeHistorique && !emplacementId) {
               erreur = `Choisissez l'emplacement pour « ${article.designation} ».`;
             } else if (!modeHistorique) {
-              const dejaReserve = emplacementId ? quantitesReservees.get(`${article.id}|${emplacementId}`) ?? 0 : 0;
-              const restant = Math.max(0, disponible - dejaReserve);
+              const restant = disponible;
               if (!emplacementId || restant < quantite) {
-                const alternatives = stocksArticle.filter((s) => {
-                  const reserve = quantitesReservees.get(`${article.id}|${s.id}`) ?? 0;
-                  return s.quantite - reserve >= quantite;
-                });
+                const alternatives = stocksArticle.filter((s) => s.quantite >= quantite);
                 erreur = alternatives.length > 0
                   ? `Stock insuffisant à « ${emplacementNom ?? emplacementSaisi ?? "l'emplacement choisi"} » : ${restant} disponible(s) pour ${quantite} demandé(s). Choisissez un emplacement suffisant.`
                   : `Stock insuffisant pour « ${article.designation} » : ${restant} disponible(s) à « ${emplacementNom ?? emplacementSaisi ?? "l'emplacement choisi"} » et aucun autre emplacement ne couvre ${quantite}.`;
@@ -563,6 +571,7 @@ export function ImportVentesSection() {
     setErreurGenerale(null);
     setResultat(null);
     setGroupes([]);
+    correctionsRef.current = {};
     setCorrections({});
     setAnalyse(true);
     try {
@@ -586,20 +595,24 @@ export function ImportVentesSection() {
 
   function modifierLigne(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
     const cle = cleLigne(numero, ligneIndex);
-    setCorrections((precedentes) => ({
-      ...precedentes,
-      [cle]: { ...precedentes[cle], ...patch },
-    }));
+    const next = {
+      ...correctionsRef.current,
+      [cle]: { ...correctionsRef.current[cle], ...patch },
+    };
+    correctionsRef.current = next;
+    setCorrections(next);
   }
 
   async function appliquerCorrection(numero: string, ligneIndex: number, patch: CorrectionsLigne) {
+    const cle = cleLigne(numero, ligneIndex);
     const next = {
-      ...corrections,
-      [cleLigne(numero, ligneIndex)]: {
-        ...corrections[cleLigne(numero, ligneIndex)],
+      ...correctionsRef.current,
+      [cle]: {
+        ...correctionsRef.current[cle],
         ...patch,
       },
     };
+    correctionsRef.current = next;
     setCorrections(next);
     if (lignesBrutesCourantes.length > 0) await analyser(lignesBrutesCourantes, next);
   }
@@ -744,6 +757,7 @@ export function ImportVentesSection() {
     );
     setGroupes([]);
     setLignesBrutesCourantes([]);
+    correctionsRef.current = {};
     setCorrections({});
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -767,7 +781,9 @@ export function ImportVentesSection() {
     const key = cleLigne(groupe.numero, verification.ligneIndex);
     const hasStockAlternatives = verification.stocksParEmplacement.some((s) => s.quantite >= verification.quantite);
     const stockTotal = verification.stocksParEmplacement.reduce((sum, s) => sum + s.quantite, 0);
-    const articleExactEtStockOK = verification.articleType === "exact" && !verification.erreur && !verification.horsCatalogue;
+    const articleExactEtStockOK = verification.horsCatalogue
+      ? !verification.erreur
+      : verification.articleType === "exact" && !verification.erreur;
 
     return (
       <div key={key} className={`rounded-lg border p-3 ${articleExactEtStockOK ? "border-emerald-100 bg-emerald-50/30" : "border-onyx-200 bg-white"}`}>
