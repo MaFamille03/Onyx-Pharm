@@ -339,8 +339,6 @@ export function ImportVentesSection() {
     setErreurGenerale(null);
     try {
       const refs = articles.length > 0 ? { articles, stocks } : await chargerDonneesReference();
-      if (refs.articles.length === 0) throw new Error("Aucun article n'est enregistré dans le stock/catalogue.");
-
       const stockParCle = new Map<string, number>();
       for (const stock of refs.stocks) {
         const cle = `${stock.article_id}|${stock.emplacement_id}`;
@@ -576,10 +574,6 @@ export function ImportVentesSection() {
       }
       setLignesBrutesCourantes(brutes);
       const refs = await chargerDonneesReference();
-      if (refs.articles.length === 0) {
-        setErreurGenerale("Aucun article n'est enregistré dans le stock/catalogue.");
-        return;
-      }
       await analyser(brutes, {});
     } catch (err) {
       // eslint-disable-next-line no-console
