@@ -573,7 +573,6 @@ export function ImportVentesSection() {
         return;
       }
       setLignesBrutesCourantes(brutes);
-      const refs = await chargerDonneesReference();
       await analyser(brutes, {});
     } catch (err) {
       // eslint-disable-next-line no-console
