@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   AlertCircle,
   CheckCircle2,
@@ -22,7 +23,7 @@ import { InlineBanner } from "@/components/ui/Badges";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
 
 const COLONNES_MODELE = [
-  "N° de vente (regroupement)",
+  "N° de BL",
   "Date de vente",
   "Client",
   "Article",
@@ -63,11 +64,12 @@ type CorrespondanceArticle = {
 };
 
 type LigneResolue = {
-  article_id: string;
+  article_id: string | null;
   designation: string;
-  emplacement_id: string;
+  emplacement_id: string | null;
   quantite: number;
   prix: number;
+  hors_catalogue: boolean;
 };
 
 type VerificationLigne = {
@@ -87,6 +89,7 @@ type VerificationLigne = {
   prix: number;
   erreur: string | null;
   besoinCorrection: boolean;
+  horsCatalogue: boolean;
 };
 
 type GroupeVente = {
@@ -104,6 +107,7 @@ type GroupeVente = {
 
 type CorrectionsLigne = {
   articleId?: string;
+  horsCatalogue?: boolean;
   articleDesignation?: string;
   quantite?: number;
   emplacementId?: string;
@@ -285,50 +289,30 @@ export function ImportVentesSection() {
   }
 
   function telechargerModele() {
-    exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, [
-      {
-        "N° de vente (regroupement)": "V1",
-        "Date de vente": "2026-09-01",
-        Client: "Client Exemple",
-        Article: "Paracétamol 500 mg",
-        Emplacement: emplacements[0]?.nom ?? "Entrepôt",
-        Quantité: 10,
-        "Prix de vente unitaire": 500,
-        Avance: 3000,
-        Reste: 2000,
-        Statut: "Avance",
-        "Mode de paiement": "Espèces",
-        Observation: "",
-      },
-      {
-        "N° de vente (regroupement)": "V1",
-        "Date de vente": "2026-09-01",
-        Client: "Client Exemple",
-        Article: "Compresses stériles",
-        Emplacement: emplacements[0]?.nom ?? "Entrepôt",
-        Quantité: 3,
-        "Prix de vente unitaire": 1000,
-        Avance: "",
-        Reste: "",
-        Statut: "",
-        "Mode de paiement": "",
-        Observation: "Les colonnes de paiement sont renseignées uniquement sur la première ligne de la vente.",
-      },
-      {
-        "N° de vente (regroupement)": "V2",
-        "Date de vente": "2025-03-15",
-        Client: "Ancien Client",
-        Article: "Gants stériles",
-        Emplacement: "",
-        Quantité: 20,
-        "Prix de vente unitaire": 300,
-        Avance: 0,
-        Reste: 6000,
-        Statut: "Non payée",
-        "Mode de paiement": "",
-        Observation: "Vente ancienne : emplacement facultatif et aucun impact sur le stock actuel.",
-      },
-    ]);
+    exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, []);
+  }
+
+  async function validerStructureFichier(file: File) {
+    const buffer = await file.arrayBuffer();
+    const classeur = XLSX.read(buffer, { type: "array" });
+    const nomFeuille = classeur.SheetNames[0];
+    if (!nomFeuille) throw new Error("Le fichier ne contient aucune feuille Excel.");
+
+    const feuille = classeur.Sheets[nomFeuille];
+    const range = XLSX.utils.decode_range(feuille["!ref"] ?? "A1:L1");
+    const entetes = Array.from({ length: range.e.c - range.s.c + 1 }, (_, index) => {
+      const cellule = feuille[XLSX.utils.encode_cell({ r: range.s.r, c: range.s.c + index })];
+      return String(cellule?.v ?? "").trim();
+    });
+
+    const conforme = entetes.length === COLONNES_MODELE.length &&
+      COLONNES_MODELE.every((colonne, index) => entetes[index] === colonne);
+
+    if (!conforme) {
+      throw new Error(
+        `Format de fichier invalide. Utilisez uniquement le modèle officiel des ventes ONYX PHARM. Les 12 colonnes doivent être présentes dans l'ordre exact, avec « N° de BL » comme première colonne.`,
+      );
+    }
   }
 
   function cleLigne(numero: string, ligneIndex: number) {
@@ -365,13 +349,13 @@ export function ImportVentesSection() {
 
       const parGroupe = new Map<string, LigneBrute[]>();
       for (const ligne of brutes) {
-        const cle = String(ligne["N° de vente (regroupement)"] ?? "").trim();
+        const cle = String(ligne["N° de BL"] ?? "").trim();
         if (!cle) continue;
         if (!parGroupe.has(cle)) parGroupe.set(cle, []);
         parGroupe.get(cle)!.push(ligne);
       }
       if (parGroupe.size === 0) {
-        setErreurGenerale("Aucune ligne valide : la colonne \"N° de vente (regroupement)\" doit être renseignée.");
+        setErreurGenerale("Aucune ligne valide : la colonne \"N° de BL\" doit être renseignée.");
         setGroupes([]);
         return;
       }
@@ -411,7 +395,8 @@ export function ImportVentesSection() {
                 : null, suggestions: [] }
             : trouverArticle(designationRecherchee, refs.articles);
 
-          const article = rechercheArticle.correspondance?.article ?? null;
+          const horsCatalogue = correctionsActuelles[cle]?.horsCatalogue === true;
+          const article = horsCatalogue ? null : (rechercheArticle.correspondance?.article ?? null);
           const articleType = rechercheArticle.correspondance?.type ?? null;
           const stocksArticle = article
             ? emplacements.map((emplacement) => ({
@@ -426,9 +411,17 @@ export function ImportVentesSection() {
           let disponible = 0;
           let erreur: string | null = null;
 
-          if (!article) {
+          if (horsCatalogue) {
+            if (!articleSaisi && !designationRecherchee) {
+              erreur = "Désignation de l'article hors catalogue manquante.";
+            } else if (!Number.isFinite(quantite) || quantite <= 0) {
+              erreur = "Quantité invalide : indiquez une quantité supérieure à 0.";
+            } else if (!Number.isFinite(prix) || prix <= 0) {
+              erreur = "Prix de vente unitaire invalide : indiquez un montant supérieur à 0.";
+            }
+          } else if (!article) {
             erreur = articleSaisi
-              ? `Article « ${articleSaisi} » à confirmer : aucune correspondance suffisamment sûre.`
+              ? `Article « ${articleSaisi} » à confirmer : aucune correspondance suffisamment sûre, ou choisissez « hors catalogue ».`
               : "Désignation de l'article manquante.";
           } else {
             if (!emplacementId && emplacementSaisi) {
@@ -459,9 +452,7 @@ export function ImportVentesSection() {
 
           const besoinCorrection = Boolean(
             erreur ||
-            !article ||
-            articleType === "approx" ||
-            (article && !modeHistorique && (!emplacementId || disponible < quantite)),
+            (!horsCatalogue && (!article || articleType === "approx" || (article && !modeHistorique && (!emplacementId || disponible < quantite))))
           );
 
           const verification: VerificationLigne = {
@@ -481,19 +472,30 @@ export function ImportVentesSection() {
             prix,
             erreur,
             besoinCorrection,
+            horsCatalogue,
           };
           verifications.push(verification);
 
           // Référence locale explicite : évite que TypeScript perde le
           // narrowing de `article` dans ce bloc.
           const articleResolue = article;
-          if (!erreur && articleResolue !== null && emplacementId) {
+          if (!erreur && horsCatalogue) {
+            lignesResolues.push({
+              article_id: null,
+              designation: designationRecherchee || articleSaisi,
+              emplacement_id: null,
+              quantite,
+              prix,
+              hors_catalogue: true,
+            });
+          } else if (!erreur && articleResolue !== null && emplacementId) {
             lignesResolues.push({
               article_id: articleResolue.id,
               designation: articleResolue.designation,
               emplacement_id: emplacementId,
               quantite,
               prix,
+              hors_catalogue: false,
             });
             if (!modeHistorique) {
               const cleStock = `${articleResolue.id}|${emplacementId}`;
@@ -566,6 +568,7 @@ export function ImportVentesSection() {
     setCorrections({});
     setAnalyse(true);
     try {
+      await validerStructureFichier(file);
       const brutes = await lireFichierExcel(file);
       if (brutes.length === 0) {
         setErreurGenerale("Ce fichier ne contient aucune ligne.");
@@ -664,13 +667,15 @@ export function ImportVentesSection() {
       const { error: lignesError } = await supabase.from("lignes_ventes").insert(
         groupe.lignesResolues.map((l) => ({
           vente_id: vente.id,
-          article_id: l.article_id,
-          emplacement_id: l.emplacement_id,
+          article_id: l.hors_catalogue ? null : l.article_id,
+          emplacement_id: l.hors_catalogue ? null : l.emplacement_id,
           quantite: l.quantite,
           prix_achat_reference: 0,
           prix_vente_conseille_reference: l.prix,
           prix_vente_reel: l.prix,
           remise: 0,
+          designation_hors_catalogue: l.hors_catalogue ? l.designation : null,
+          hors_catalogue: l.hors_catalogue,
         })),
       );
 
@@ -769,7 +774,7 @@ export function ImportVentesSection() {
     const key = cleLigne(groupe.numero, verification.ligneIndex);
     const hasStockAlternatives = verification.stocksParEmplacement.some((s) => s.quantite >= verification.quantite);
     const stockTotal = verification.stocksParEmplacement.reduce((sum, s) => sum + s.quantite, 0);
-    const articleExactEtStockOK = verification.articleType === "exact" && !verification.erreur;
+    const articleExactEtStockOK = verification.articleType === "exact" && !verification.erreur && !verification.horsCatalogue;
 
     return (
       <div key={key} className={`rounded-lg border p-3 ${articleExactEtStockOK ? "border-emerald-100 bg-emerald-50/30" : "border-onyx-200 bg-white"}`}>
@@ -782,6 +787,10 @@ export function ImportVentesSection() {
               {articleExactEtStockOK ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
                   <PackageCheck size={12} /> Correspondance exacte · stock disponible
+                </span>
+              ) : verification.horsCatalogue ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-accent-100 px-2 py-1 text-[11px] font-semibold text-accent-700">
+                  <CheckCircle2 size={12} /> Article hors catalogue · aucun stock
                 </span>
               ) : verification.articleType === "approx" && verification.article ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">
@@ -870,6 +879,25 @@ export function ImportVentesSection() {
                 placeholder="Nom de l'article…"
                 className="w-full rounded-md border border-onyx-200 bg-white px-2.5 py-2 text-sm text-onyx-800 outline-none focus:border-accent-400"
               />
+              {!verification.article && (
+                <button
+                  type="button"
+                  onClick={() => void appliquerCorrection(groupe.numero, verification.ligneIndex, {
+                    horsCatalogue: !verification.horsCatalogue,
+                    articleId: undefined,
+                    emplacementId: undefined,
+                  })}
+                  className={`mt-2 rounded-md border px-2.5 py-2 text-xs font-medium transition-colors ${verification.horsCatalogue ? "border-accent-300 bg-accent-50 text-accent-700" : "border-onyx-200 bg-white text-onyx-600 hover:border-accent-300"}`}
+                >
+                  {verification.horsCatalogue ? "✓ Article hors catalogue · aucun stock" : "Vendre comme article hors catalogue"}
+                </button>
+              )}
+              {verification.horsCatalogue && (
+                <p className="mt-2 rounded-md bg-accent-50 px-3 py-2 text-xs text-accent-700">
+                  Cette ligne sera enregistrée dans la vente sans créer ni modifier de stock.
+                </p>
+              )}
+
               {verification.suggestionsArticles.length > 0 && (
                 <div className="mt-2 space-y-1">
                   <p className="text-[10px] font-semibold text-onyx-400">Suggestions du catalogue :</p>
@@ -880,6 +908,7 @@ export function ImportVentesSection() {
                       onClick={() => void appliquerCorrection(groupe.numero, verification.ligneIndex, {
                         articleId: suggestion.article.id,
                         articleDesignation: suggestion.article.designation,
+                        horsCatalogue: false,
                       })}
                       className="flex w-full items-center justify-between rounded-md border border-onyx-100 bg-onyx-50 px-2.5 py-2 text-left text-xs hover:border-accent-300 hover:bg-accent-50"
                     >
@@ -895,7 +924,9 @@ export function ImportVentesSection() {
               <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-onyx-400">
                 <MapPin size={11} /> Stock disponible par emplacement
               </div>
-              {!verification.article ? (
+              {verification.horsCatalogue ? (
+                <p className="rounded-md bg-accent-50 px-3 py-2 text-xs text-accent-700">Aucun stock ne sera recherché ou modifié pour cet article.</p>
+              ) : !verification.article ? (
                 <p className="rounded-md bg-onyx-50 px-3 py-2 text-xs text-onyx-500">Sélectionnez d&apos;abord l&apos;article correspondant pour afficher son stock par emplacement.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
