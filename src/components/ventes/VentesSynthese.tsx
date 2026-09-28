@@ -96,7 +96,7 @@ export function VentesSynthese() {
         .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
         .gte("date_vente", debut)
         .lt("date_vente", finQuery)
-        .not("statut", "in", "(Annulé,Brouillon)"),
+        .not("statut", "eq", "Annulé"),
       supabase
         .from("paiements_ventes")
         .select("montant, date_paiement, vente_id"),
@@ -176,11 +176,13 @@ export function VentesSynthese() {
       return;
     }
 
+    // Afficher toutes les factures/ventes du client, quel que soit leur état de paiement.
+    // Seules les ventes annulées ou brouillons sont exclues : Soldée, Avance et Non payée restent visibles.
     const { data, error: facsError } = await supabase
       .from("ventes")
       .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
       .in("client_id", client.client_ids)
-      .not("statut", "in", "(Annulé,Brouillon)")
+      .not("statut", "eq", "Annulé")
       .order("date_vente", { ascending: false });
 
     if (facsError) {
