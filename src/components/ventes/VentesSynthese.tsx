@@ -191,7 +191,30 @@ export function VentesSynthese() {
       return;
     }
 
-    const factures = (data ?? []) as VentePeriode[];
+    // Complément volontairement limité à cette fonction :
+    // certains historiques peuvent avoir le même client par nom mais un
+    // client_id différent. On les récupère aussi afin qu'une facture soldée
+    // ne disparaisse pas de la fiche du client sélectionné.
+    const { data: facturesParNom, error: nomError } = await supabase
+      .from("ventes")
+      .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
+      .not("statut", "eq", "Annulé")
+      .eq("clients.nom", client.client_nom)
+      .order("date_vente", { ascending: false });
+
+    if (nomError) {
+      setError((prev) => prev ?? logSupabaseError({ table: "ventes", operation: "select FAC client par nom" }, nomError, "Impossible de compléter les factures de ce client."));
+    }
+
+    const facturesParId = (data ?? []) as VentePeriode[];
+    const facturesNom = (facturesParNom ?? []) as VentePeriode[];
+    const facturesMap = new Map<string, VentePeriode>();
+    for (const facture of [...facturesParId, ...facturesNom]) {
+      facturesMap.set(facture.id, facture);
+    }
+    const factures = Array.from(facturesMap.values()).sort(
+      (a, b) => new Date(b.date_vente).getTime() - new Date(a.date_vente).getTime()
+    );
     const ids = factures.map((v) => v.id);
     let paiementsClient: PaiementPeriode[] = [];
     if (ids.length) {
