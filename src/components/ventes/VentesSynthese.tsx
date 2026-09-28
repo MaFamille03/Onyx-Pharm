@@ -158,6 +158,33 @@ export function VentesSynthese() {
           }
         }
       }
+
+      // Certaines vues de synthèse excluent les brouillons. On ajoute donc
+      // uniquement les clients qui n'existent pas encore dans la synthèse
+      // mais qui possèdent une vente non annulée sur la période sélectionnée.
+      // Cela permet de sélectionner un client importé avec un brouillon sans
+      // modifier les totaux déjà calculés par la vue.
+      for (const vente of (ventesRes.data ?? []) as VentePeriode[]) {
+        const nom = vente.clients?.[0]?.nom?.trim();
+        if (!nom) continue;
+        const cle = nom.toLocaleLowerCase("fr-FR");
+        const clientId = vente.client_id ?? "";
+        const existant = groupes.get(cle);
+        if (existant) {
+          if (clientId && !existant.client_ids.includes(clientId)) existant.client_ids.push(clientId);
+          continue;
+        }
+        groupes.set(cle, {
+          client_id: clientId,
+          client_ids: clientId ? [clientId] : [],
+          client_nom: nom,
+          nombre_ventes: 1,
+          total_achats: 0,
+          total_paye: 0,
+          total_du: 0,
+          derniere_vente: vente.date_vente ?? null,
+        });
+      }
       setClients(Array.from(groupes.values()).sort((a, b) => b.total_du - a.total_du));
     }
 

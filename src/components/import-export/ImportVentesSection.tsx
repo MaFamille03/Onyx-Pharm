@@ -103,6 +103,7 @@ type GroupeVente = {
   erreurs: string[];
   doublonProbable: boolean;
   valide: boolean;
+  statutImport: string;
 };
 
 type CorrectionsLigne = {
@@ -306,6 +307,21 @@ export function ImportVentesSection() {
     return null;
   }
 
+  function normaliserStatutImport(valeur: unknown): string {
+    const statut = String(valeur ?? "")
+      .trim()
+      .toLocaleLowerCase("fr-FR")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    if (statut === "brouillon") return "Brouillon";
+    if (["annule", "annulee"].includes(statut)) return "Annulé";
+    if (["soldee", "paye", "payee"].includes(statut)) return "Soldée";
+    if (["avance", "partiellement paye", "partiellement payee"].includes(statut)) return "Avance";
+    if (["non payee", "non paye", "valide", "validee"].includes(statut)) return "Non payée";
+    return String(valeur ?? "").trim();
+  }
+
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, []);
   }
@@ -391,6 +407,7 @@ export function ImportVentesSection() {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ».`);
         }
         const nomClient = String(premiere.Client ?? "").trim();
+        const statutImport = normaliserStatutImport(premiere.Statut);
         const verifications: VerificationLigne[] = [];
         const lignesResolues: LigneResolue[] = [];
 
@@ -458,7 +475,7 @@ export function ImportVentesSection() {
               erreur = "Quantité invalide : indiquez une quantité supérieure à 0.";
             } else if (!modeHistorique && !emplacementId) {
               erreur = `Choisissez l'emplacement pour « ${article.designation} ».`;
-            } else if (!modeHistorique) {
+            } else if (!modeHistorique && statutImport !== "Brouillon") {
               const restant = disponible;
               if (!emplacementId || restant < quantite) {
                 const alternatives = stocksArticle.filter((s) => s.quantite >= quantite);
@@ -471,7 +488,7 @@ export function ImportVentesSection() {
 
           const besoinCorrection = Boolean(
             erreur ||
-            (!horsCatalogue && (!article || articleType === "approx" || (article && !modeHistorique && (!emplacementId || disponible < quantite))))
+            (!horsCatalogue && (!article || articleType === "approx" || (article && !modeHistorique && (!emplacementId || (statutImport !== "Brouillon" && disponible < quantite)))))
           );
 
           const verification: VerificationLigne = {
@@ -516,7 +533,7 @@ export function ImportVentesSection() {
               prix,
               hors_catalogue: false,
             });
-            if (!modeHistorique) {
+            if (!modeHistorique && statutImport !== "Brouillon") {
               const cleStock = `${articleResolue.id}|${emplacementId}`;
               quantitesReservees.set(cleStock, (quantitesReservees.get(cleStock) ?? 0) + quantite);
             }
@@ -557,6 +574,7 @@ export function ImportVentesSection() {
           erreurs: [...erreurs, ...lignesAvecErreur.map((v) => v.erreur!).filter(Boolean)],
           doublonProbable,
           valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length,
+          statutImport,
         });
       }
 
@@ -649,6 +667,12 @@ export function ImportVentesSection() {
         continue;
       }
 
+      // Les ventes annulées ne sont jamais importées : elles ne doivent pas
+      // apparaître dans la synthèse ni dans la liste des commandes du client.
+      if (groupe.statutImport === "Annulé") {
+        continue;
+      }
+
       let clientId: string | null = null;
       if (groupe.nomClient) {
         clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
@@ -690,9 +714,11 @@ export function ImportVentesSection() {
         continue;
       }
 
-      // Le statut financier est ensuite déterminé par le système de ventes :
-      // reste = 0 → paiement complet → « Payé » ; reste > 0 et avance > 0
-      // → « Partiellement payé » ; avance = 0 → « Validé ».
+      // Le statut financier reste piloté par les paiements. La colonne
+      // « Statut » du fichier sert uniquement à préserver le brouillon et à
+      // exclure les ventes annulées ; Soldée / Avance / Non payée sont
+      // reconstitués à partir du montant d'avance réellement enregistré.
+      const estBrouillonImport = groupe.statutImport === "Brouillon";
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
       if (refError || !refData) {
         erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
@@ -746,7 +772,11 @@ export function ImportVentesSection() {
         continue;
       }
 
-      if (modeHistorique) {
+      if (estBrouillonImport) {
+        // Le brouillon reste volontairement non validé : aucun mouvement de
+        // stock ne doit être créé pour une commande encore en brouillon.
+        enBrouillon += 1;
+      } else if (modeHistorique) {
         const { error: majStatutError } = await supabase.from("ventes").update({ statut: "Validé" }).eq("id", vente.id);
         if (majStatutError) {
           erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée.`);
