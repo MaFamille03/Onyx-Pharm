@@ -138,11 +138,22 @@ function normaliserDesignation(texte: string): string {
     .trim();
 }
 
+// Empreinte de recherche : rend la comparaison tolérante aux différences
+// de ponctuation, d'espacement et d'ordre des mots, sans modifier la
+// désignation réellement enregistrée dans le catalogue ou la vente.
+function empreinteDesignation(texte: string): string {
+  return Array.from(new Set(normaliserDesignation(texte).split(" ").filter(Boolean)))
+    .sort()
+    .join(" ");
+}
+
 function similariteTexte(a: string, b: string): number {
   const gauche = normaliserDesignation(a);
   const droite = normaliserDesignation(b);
+  const empreinteGauche = empreinteDesignation(a);
+  const empreinteDroite = empreinteDesignation(b);
   if (!gauche || !droite) return 0;
-  if (gauche === droite) return 1;
+  if (gauche === droite || empreinteGauche === empreinteDroite) return 1;
 
   const motsA = new Set(gauche.split(" ").filter((mot) => mot.length >= 2));
   const motsB = new Set(droite.split(" ").filter((mot) => mot.length >= 2));
@@ -166,8 +177,10 @@ function trouverArticle(
   const recherche = normaliserDesignation(designationRecherchee);
   if (!recherche) return { correspondance: null, suggestions: [] };
 
+  const empreinteRecherche = empreinteDesignation(designationRecherchee);
   const exacts = articles.filter(
-    (article) => normaliserDesignation(article.designation) === recherche,
+    (article) => normaliserDesignation(article.designation) === recherche
+      || empreinteDesignation(article.designation) === empreinteRecherche,
   );
   if (exacts.length === 1) {
     return {
@@ -394,7 +407,7 @@ export function ImportVentesSection() {
 
           const rechercheArticle = correction.articleId
             ? { correspondance: refs.articles.find((a) => a.id === correction.articleId)
-                ? { article: refs.articles.find((a) => a.id === correction.articleId)!, type: "approx" as const, score: 1 }
+                ? { article: refs.articles.find((a) => a.id === correction.articleId)!, type: "exact" as const, score: 1 }
                 : null, suggestions: [] }
             : trouverArticle(designationRecherchee, refs.articles);
 
@@ -783,7 +796,7 @@ export function ImportVentesSection() {
     const stockTotal = verification.stocksParEmplacement.reduce((sum, s) => sum + s.quantite, 0);
     const articleExactEtStockOK = verification.horsCatalogue
       ? !verification.erreur
-      : verification.articleType === "exact" && !verification.erreur;
+      : Boolean(verification.article && !verification.erreur && verification.emplacementId && (modeHistorique || verification.disponible >= verification.quantite));
 
     return (
       <div key={key} className={`rounded-lg border p-3 ${articleExactEtStockOK ? "border-emerald-100 bg-emerald-50/30" : "border-onyx-200 bg-white"}`}>
@@ -793,13 +806,13 @@ export function ImportVentesSection() {
               <span className="rounded-md bg-onyx-100 px-2 py-1 text-[11px] font-semibold text-onyx-500">
                 Ligne {verification.ligneIndex + 1}
               </span>
-              {articleExactEtStockOK ? (
+              {verification.horsCatalogue && !verification.erreur ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                  <CheckCircle2 size={12} /> Article hors catalogue · validé · aucun stock
+                </span>
+              ) : articleExactEtStockOK ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
                   <PackageCheck size={12} /> Correspondance exacte · stock disponible
-                </span>
-              ) : verification.horsCatalogue ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-accent-100 px-2 py-1 text-[11px] font-semibold text-accent-700">
-                  <CheckCircle2 size={12} /> Article hors catalogue · aucun stock
                 </span>
               ) : verification.articleType === "approx" && verification.article ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">
@@ -848,7 +861,7 @@ export function ImportVentesSection() {
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-onyx-400">Emplacement</p>
                   <p className="mt-1 flex items-center gap-1 text-sm font-medium text-onyx-800"><MapPin size={13} /> {verification.emplacementNom}</p>
-                  <p className="mt-0.5 text-xs text-emerald-600">{verification.disponible} disponible(s)</p>
+                  <p className="mt-0.5 text-xs text-emerald-600">{verification.disponible} disponible(s) après les ventes précédentes</p>
                 </div>
               ) : (
                 <div>
@@ -883,8 +896,16 @@ export function ImportVentesSection() {
               </div>
               <input
                 value={corrections[key]?.articleDesignation ?? verification.articleSaisi}
-                onChange={(e) => modifierLigne(groupe.numero, verification.ligneIndex, { articleDesignation: e.target.value, articleId: undefined })}
-                onBlur={(e) => void appliquerCorrection(groupe.numero, verification.ligneIndex, { articleDesignation: e.currentTarget.value, articleId: undefined })}
+                onChange={(e) => modifierLigne(groupe.numero, verification.ligneIndex, {
+                  articleDesignation: e.target.value,
+                  articleId: undefined,
+                  emplacementId: undefined,
+                })}
+                onBlur={(e) => void appliquerCorrection(groupe.numero, verification.ligneIndex, {
+                  articleDesignation: e.currentTarget.value,
+                  articleId: undefined,
+                  emplacementId: undefined,
+                })}
                 placeholder="Nom de l'article…"
                 className="w-full rounded-md border border-onyx-200 bg-white px-2.5 py-2 text-sm text-onyx-800 outline-none focus:border-accent-400"
               />
@@ -918,6 +939,7 @@ export function ImportVentesSection() {
                         articleId: suggestion.article.id,
                         articleDesignation: suggestion.article.designation,
                         horsCatalogue: false,
+                        emplacementId: undefined,
                       })}
                       className="flex w-full items-center justify-between rounded-md border border-onyx-100 bg-onyx-50 px-2.5 py-2 text-left text-xs hover:border-accent-300 hover:bg-accent-50"
                     >
