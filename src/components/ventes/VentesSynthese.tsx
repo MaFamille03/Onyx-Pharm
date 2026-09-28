@@ -172,7 +172,35 @@ export function VentesSynthese() {
     setLoadingFacs(true);
     setVenteOuverteId(null);
     setFacsClient([]);
-    if (!client.client_ids.length) {
+    // On part des identifiants connus par la synthèse, puis on complète avec
+    // toutes les fiches clients portant le même nom. Cela évite qu'une vente
+    // (notamment un brouillon ou une ancienne facture) soit perdue si elle
+    // est rattachée à une autre fiche portant le même nom.
+    const clientIds = new Set(client.client_ids.filter(Boolean));
+    const nomNormalise = client.client_nom
+      .trim()
+      .toLocaleLowerCase("fr-FR")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ");
+
+    const { data: fichesClients, error: fichesClientsError } = await supabase
+      .from("clients")
+      .select("id, nom");
+
+    if (!fichesClientsError) {
+      for (const fiche of fichesClients ?? []) {
+        const ficheNom = String(fiche.nom ?? "")
+          .trim()
+          .toLocaleLowerCase("fr-FR")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, " ");
+        if (ficheNom === nomNormalise && fiche.id) clientIds.add(fiche.id);
+      }
+    }
+
+    if (!clientIds.size) {
       setLoadingFacs(false);
       return;
     }
@@ -183,7 +211,7 @@ export function VentesSynthese() {
     const { data, error: facsError } = await supabase
       .from("ventes")
       .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
-      .in("client_id", client.client_ids)
+      .in("client_id", Array.from(clientIds))
       .not("statut", "eq", "Annulé")
       .order("date_vente", { ascending: false });
 
