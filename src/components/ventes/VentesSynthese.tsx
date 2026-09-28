@@ -69,6 +69,7 @@ export function VentesSynthese() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clientSelectionneNom, setClientSelectionneNom] = useState<string | null>(null);
+  const [rechercheClient, setRechercheClient] = useState("");
   const [clientOuvertNom, setClientOuvertNom] = useState<string | null>(null);
   const facSectionRef = useRef<HTMLDivElement | null>(null);
   const [venteOuverteId, setVenteOuverteId] = useState<string | null>(null);
@@ -176,8 +177,9 @@ export function VentesSynthese() {
       return;
     }
 
-    // Afficher toutes les factures/ventes du client, quel que soit leur état de paiement.
-    // Seules les ventes annulées ou brouillons sont exclues : Soldée, Avance et Non payée restent visibles.
+    // Afficher toutes les commandes du client, quel que soit leur état.
+    // Les ventes annulées sont exclues ; les ventes Soldée, Avance, Non payée
+    // et les Brouillons restent visibles dans la liste.
     const { data, error: facsError } = await supabase
       .from("ventes")
       .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
@@ -191,30 +193,7 @@ export function VentesSynthese() {
       return;
     }
 
-    // Complément volontairement limité à cette fonction :
-    // certains historiques peuvent avoir le même client par nom mais un
-    // client_id différent. On les récupère aussi afin qu'une facture soldée
-    // ne disparaisse pas de la fiche du client sélectionné.
-    const { data: facturesParNom, error: nomError } = await supabase
-      .from("ventes")
-      .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
-      .not("statut", "eq", "Annulé")
-      .eq("clients.nom", client.client_nom)
-      .order("date_vente", { ascending: false });
-
-    if (nomError) {
-      setError((prev) => prev ?? logSupabaseError({ table: "ventes", operation: "select FAC client par nom" }, nomError, "Impossible de compléter les factures de ce client."));
-    }
-
-    const facturesParId = (data ?? []) as VentePeriode[];
-    const facturesNom = (facturesParNom ?? []) as VentePeriode[];
-    const facturesMap = new Map<string, VentePeriode>();
-    for (const facture of [...facturesParId, ...facturesNom]) {
-      facturesMap.set(facture.id, facture);
-    }
-    const factures = Array.from(facturesMap.values()).sort(
-      (a, b) => new Date(b.date_vente).getTime() - new Date(a.date_vente).getTime()
-    );
+    const factures = (data ?? []) as VentePeriode[];
     const ids = factures.map((v) => v.id);
     let paiementsClient: PaiementPeriode[] = [];
     if (ids.length) {
@@ -231,8 +210,19 @@ export function VentesSynthese() {
     setFacsClient(factures.map((vente) => {
       const total = Number(vente.montant_total || 0);
       const paye = payes.get(vente.id) ?? 0;
+
+      // Un brouillon conserve toujours son statut métier : il ne doit jamais
+      // être transformé en Soldée / Avance / Non payée selon les paiements.
+      if (vente.statut === "Brouillon") {
+        return { ...vente, montant_paye: paye, statut: "Brouillon" };
+      }
+
       const reste = Math.max(0, total - paye);
-      return { ...vente, montant_paye: paye, statut: reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée" };
+      return {
+        ...vente,
+        montant_paye: paye,
+        statut: reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée",
+      };
     }));
     setLoadingFacs(false);
   }, [supabase]);
@@ -328,6 +318,15 @@ export function VentesSynthese() {
     }
   }
 
+  const clientsFiltres = useMemo(() => {
+    const terme = rechercheClient.trim().toLocaleLowerCase("fr-FR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (!terme) return clients;
+    return clients.filter((client) => {
+      const nom = client.client_nom.toLocaleLowerCase("fr-FR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return nom.includes(terme);
+    });
+  }, [clients, rechercheClient]);
+
   return (
     <section className="mt-5 flex h-[calc(100vh-5rem)] lg:h-[calc(100vh+6rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-onyx-100 bg-white shadow-sm">
       {/* Zone haute fixe : titre + indicateurs + période analysée */}
@@ -393,9 +392,17 @@ export function VentesSynthese() {
           <div className="shrink-0 border-b border-onyx-100 bg-white px-4 py-3 shadow-sm">
             <h3 className="text-sm font-semibold text-onyx-800">Situation cumulée par client</h3>
             <p className="text-xs text-onyx-400">Cliquez sur un client pour ouvrir sa situation et afficher ses factures.</p>
+            <input
+              type="search"
+              value={rechercheClient}
+              onChange={(e) => setRechercheClient(e.target.value)}
+              placeholder="Rechercher un client..."
+              className="mt-3 w-full rounded-lg border border-onyx-200 bg-white px-3 py-2 text-sm text-onyx-800 outline-none placeholder:text-onyx-400 focus:border-onyx-400"
+              aria-label="Rechercher un client"
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-onyx-50 overscroll-contain">
-            {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clients.map((c) => {
+            {loading ? <p className="p-6 text-center text-sm text-onyx-400">Chargement...</p> : clients.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client enregistré.</p> : clientsFiltres.length === 0 ? <p className="p-6 text-sm text-onyx-400">Aucun client ne correspond à la recherche.</p> : clientsFiltres.map((c) => {
               const cle = c.client_nom.toLocaleLowerCase("fr-FR");
               const ouvert = clientOuvertNom === cle;
               const selectionne = clientSelectionneNom?.toLocaleLowerCase("fr-FR") === cle;
@@ -455,7 +462,7 @@ export function VentesSynthese() {
                         <div className="min-w-0"><p className="break-all text-sm font-medium text-onyx-800">{v.reference}</p><p className="mt-0.5 text-xs text-onyx-400">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</p></div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className={`text-sm font-semibold ${reste > 0 ? "text-red-600" : "text-emerald-600"}`}>{reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée"}</p>
+                        <p className={`text-sm font-semibold ${v.statut === "Brouillon" ? "text-amber-600" : reste > 0 ? "text-red-600" : "text-emerald-600"}`}>{v.statut}</p>
                         <p className="mt-0.5 text-xs text-onyx-400">Reste {fcfa(reste)}</p>
                       </div>
                     </button>
