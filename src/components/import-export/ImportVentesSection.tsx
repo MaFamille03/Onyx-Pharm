@@ -687,9 +687,9 @@ export function ImportVentesSection() {
       groupesParClient.get(cle)!.push(groupe);
     }
     const clientsAvecErreur = new Set<string>();
-    for (const [cle, groupesClient] of groupesParClient.entries()) {
+    groupesParClient.forEach((groupesClient, cle) => {
       if (groupesClient.some((g) => !g.valide || g.doublonProbable)) clientsAvecErreur.add(cle);
-    }
+    });
 
     for (const groupesClient of groupesParClient.values()) {
       const problemes = groupesClient.filter((g) => !g.valide || g.doublonProbable);
