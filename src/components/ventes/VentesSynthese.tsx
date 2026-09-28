@@ -172,17 +172,21 @@ export function VentesSynthese() {
     setLoadingFacs(true);
     setVenteOuverteId(null);
     setFacsClient([]);
-    // On part des identifiants connus par la synthèse, puis on complète avec
-    // toutes les fiches clients portant le même nom. Cela évite qu'une vente
-    // (notamment un brouillon ou une ancienne facture) soit perdue si elle
-    // est rattachée à une autre fiche portant le même nom.
+
+    // On récupère les identifiants connus par la synthèse, puis toutes les
+    // fiches clients portant le même nom. La liste des commandes est ensuite
+    // construite à partir des ventes elles-mêmes : aucune commande n'est
+    // regroupée ou dédupliquée par statut.
     const clientIds = new Set(client.client_ids.filter(Boolean));
-    const nomNormalise = client.client_nom
-      .trim()
-      .toLocaleLowerCase("fr-FR")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\s+/g, " ");
+    const normaliserNomClient = (nom: unknown) =>
+      String(nom ?? "")
+        .trim()
+        .toLocaleLowerCase("fr-FR")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ");
+
+    const nomNormalise = normaliserNomClient(client.client_nom);
 
     const { data: fichesClients, error: fichesClientsError } = await supabase
       .from("clients")
@@ -190,68 +194,109 @@ export function VentesSynthese() {
 
     if (!fichesClientsError) {
       for (const fiche of fichesClients ?? []) {
-        const ficheNom = String(fiche.nom ?? "")
-          .trim()
-          .toLocaleLowerCase("fr-FR")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/\s+/g, " ");
-        if (ficheNom === nomNormalise && fiche.id) clientIds.add(fiche.id);
+        if (normaliserNomClient(fiche.nom) === nomNormalise && fiche.id) {
+          clientIds.add(fiche.id);
+        }
       }
     }
 
-    if (!clientIds.size) {
-      setLoadingFacs(false);
-      return;
+    // Première récupération : toutes les ventes rattachées aux fiches clients
+    // correspondant au nom sélectionné.
+    let factures: VentePeriode[] = [];
+    if (clientIds.size) {
+      const { data, error: facsError } = await supabase
+        .from("ventes")
+        .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
+        .in("client_id", Array.from(clientIds))
+        .not("statut", "eq", "Annulé")
+        .order("date_vente", { ascending: false });
+
+      if (facsError) {
+        setError(logSupabaseError({ table: "ventes", operation: "select FAC client" }, facsError, "Impossible de charger les factures de ce client."));
+        setLoadingFacs(false);
+        return;
+      }
+
+      factures = (data ?? []) as VentePeriode[];
     }
 
-    // Afficher toutes les commandes du client, quel que soit leur état.
-    // Les ventes annulées sont exclues ; les ventes Soldée, Avance, Non payée
-    // et les Brouillons restent visibles dans la liste.
-    const { data, error: facsError } = await supabase
+    // Filet de sécurité : si une vente existe avec un client dont le nom
+    // correspond mais dont l'identifiant n'était pas présent dans la synthèse,
+    // on la récupère aussi. Cela garantit qu'une facture Soldée et une facture
+    // Non payée du même client apparaissent toutes les deux.
+    const { data: ventesParNom, error: ventesParNomError } = await supabase
       .from("ventes")
       .select("id, reference, client_id, date_vente, montant_total, montant_paye, statut, clients(nom)")
-      .in("client_id", Array.from(clientIds))
       .not("statut", "eq", "Annulé")
       .order("date_vente", { ascending: false });
 
-    if (facsError) {
-      setError(logSupabaseError({ table: "ventes", operation: "select FAC client" }, facsError, "Impossible de charger les factures de ce client."));
-      setLoadingFacs(false);
-      return;
+    if (!ventesParNomError) {
+      const deja = new Set(factures.map((vente) => vente.id));
+      for (const vente of (ventesParNom ?? []) as VentePeriode[]) {
+        const nomVente = normaliserNomClient(vente.clients?.[0]?.nom);
+        if (nomVente === nomNormalise && !deja.has(vente.id)) {
+          factures.push(vente);
+          deja.add(vente.id);
+        }
+      }
     }
 
-    const factures = (data ?? []) as VentePeriode[];
+    // Une vente = une ligne. On ne déduplique jamais par référence, montant
+    // ou statut : deux factures différentes restent deux commandes différentes.
+    factures.sort((a, b) => String(b.date_vente).localeCompare(String(a.date_vente)));
+
     const ids = factures.map((v) => v.id);
     let paiementsClient: PaiementPeriode[] = [];
     if (ids.length) {
-      const { data: paiementsData } = await supabase
+      const { data: paiementsData, error: paiementsError } = await supabase
         .from("paiements_ventes")
         .select("montant, date_paiement, vente_id")
         .in("vente_id", ids);
-      paiementsClient = (paiementsData ?? []) as PaiementPeriode[];
+
+      if (paiementsError) {
+        setError((prev) => prev ?? logSupabaseError({ table: "paiements_ventes", operation: "select FAC client" }, paiementsError, "Impossible de charger les paiements des factures du client."));
+      } else {
+        paiementsClient = (paiementsData ?? []) as PaiementPeriode[];
+      }
     }
+
     const payes = new Map<string, number>();
     for (const paiement of paiementsClient) {
-      payes.set(paiement.vente_id, (payes.get(paiement.vente_id) ?? 0) + Number(paiement.montant || 0));
+      payes.set(
+        paiement.vente_id,
+        (payes.get(paiement.vente_id) ?? 0) + Number(paiement.montant || 0)
+      );
     }
-    setFacsClient(factures.map((vente) => {
-      const total = Number(vente.montant_total || 0);
-      const paye = payes.get(vente.id) ?? 0;
 
-      // Un brouillon conserve toujours son statut métier : il ne doit jamais
-      // être transformé en Soldée / Avance / Non payée selon les paiements.
-      if (vente.statut === "Brouillon") {
-        return { ...vente, montant_paye: paye, statut: "Brouillon" };
-      }
+    setFacsClient(
+      factures.map((vente) => {
+        const total = Number(vente.montant_total || 0);
+        const paye = payes.get(vente.id) ?? 0;
 
-      const reste = Math.max(0, total - paye);
-      return {
-        ...vente,
-        montant_paye: paye,
-        statut: reste === 0 ? "Soldée" : paye > 0 ? "Avance" : "Non payée",
-      };
-    }));
+        // Brouillon est un état métier indépendant du paiement.
+        if (vente.statut === "Brouillon") {
+          return {
+            ...vente,
+            montant_paye: paye,
+            statut: "Brouillon",
+          };
+        }
+
+        const reste = Math.max(0, total - paye);
+
+        return {
+          ...vente,
+          montant_paye: paye,
+          statut:
+            reste === 0
+              ? "Soldée"
+              : paye > 0
+                ? "Avance"
+                : "Non payée",
+        };
+      })
+    );
+
     setLoadingFacs(false);
   }, [supabase]);
 
