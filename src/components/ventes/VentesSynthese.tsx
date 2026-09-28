@@ -107,11 +107,12 @@ export function VentesSynthese() {
         .order("total_du", { ascending: false }),
     ]);
 
+    const ventesBrutes = (ventesRes.data ?? []) as VentePeriode[];
+    const paiementsBruts = (paiementsRes.data ?? []) as PaiementPeriode[];
+
     if (ventesRes.error) {
       setError(logSupabaseError({ table: "ventes", operation: "select synthèse" }, ventesRes.error, "Impossible de charger le résumé des ventes."));
     } else {
-      const ventesBrutes = (ventesRes.data ?? []) as VentePeriode[];
-      const paiementsBruts = (paiementsRes.data ?? []) as PaiementPeriode[];
       const paiementsParVente = new Map<string, number>();
       for (const paiement of paiementsBruts) {
         paiementsParVente.set(paiement.vente_id, (paiementsParVente.get(paiement.vente_id) ?? 0) + Number(paiement.montant || 0));
@@ -134,58 +135,50 @@ export function VentesSynthese() {
       setPaiements((paiementsRes.data ?? []) as PaiementPeriode[]);
     }
 
-    if (clientsRes.error) {
-      setError((prev) => prev ?? logSupabaseError({ table: "v_synthese_clients_ventes", operation: "select" }, clientsRes.error, "Impossible de charger la situation des clients."));
-    } else {
-      // Regroupe les fiches portant le même nom : la situation cumulée est
-      // affichée par nom de client, indépendamment des commandes/fiches liées.
-      const groupes = new Map<string, ClientSynthese>();
-      for (const client of (clientsRes.data ?? []) as ClientSynthese[]) {
-        if (typeof client.client_nom !== "string" || !client.client_nom.trim()) continue;
-        const nom = client.client_nom.trim();
-        const cle = nom.toLocaleLowerCase("fr-FR");
-        const existant = groupes.get(cle);
-        if (!existant) {
-          groupes.set(cle, { ...client, client_nom: nom, client_ids: client.client_id ? [client.client_id] : [] });
-        } else {
-          if (client.client_id && !existant.client_ids.includes(client.client_id)) existant.client_ids.push(client.client_id);
-          existant.nombre_ventes += Number(client.nombre_ventes || 0);
-          existant.total_achats += Number(client.total_achats || 0);
-          existant.total_paye += Number(client.total_paye || 0);
-          existant.total_du += Number(client.total_du || 0);
-          if (client.derniere_vente && (!existant.derniere_vente || client.derniere_vente > existant.derniere_vente)) {
-            existant.derniere_vente = client.derniere_vente;
-          }
-        }
-      }
-
-      // Certaines vues de synthèse excluent les brouillons. On ajoute donc
-      // uniquement les clients qui n'existent pas encore dans la synthèse
-      // mais qui possèdent une vente non annulée sur la période sélectionnée.
-      // Cela permet de sélectionner un client importé avec un brouillon sans
-      // modifier les totaux déjà calculés par la vue.
-      for (const vente of (ventesRes.data ?? []) as VentePeriode[]) {
-        const nom = vente.clients?.[0]?.nom?.trim();
-        if (!nom) continue;
-        const cle = nom.toLocaleLowerCase("fr-FR");
-        const clientId = vente.client_id ?? "";
-        const existant = groupes.get(cle);
-        if (existant) {
-          if (clientId && !existant.client_ids.includes(clientId)) existant.client_ids.push(clientId);
-          continue;
-        }
+    // La vue v_synthese_clients_ventes peut contenir une agrégation différente
+    // de celle utilisée par l'import (notamment selon les paiements et les
+    // statuts). Pour éviter tout écart entre Excel, les ventes réelles et la
+    // liste des clients, la situation est recalculée directement à partir des
+    // ventes non annulées de la période et des paiements réellement enregistrés.
+    // Les clients portant le même nom sont regroupés comme auparavant.
+    const groupes = new Map<string, ClientSynthese>();
+    for (const vente of ventesBrutes) {
+      const nom = vente.clients?.[0]?.nom?.trim();
+      if (!nom) continue;
+      const cle = nom.toLocaleLowerCase("fr-FR");
+      const total = Number(vente.montant_total || 0);
+      const paye = paiementsBruts
+        .filter((p) => p.vente_id === vente.id)
+        .reduce((s, p) => s + Number(p.montant || 0), 0);
+      const existant = groupes.get(cle);
+      if (!existant) {
         groupes.set(cle, {
-          client_id: clientId,
-          client_ids: clientId ? [clientId] : [],
+          client_id: vente.client_id ?? "",
+          client_ids: vente.client_id ? [vente.client_id] : [],
           client_nom: nom,
           nombre_ventes: 1,
-          total_achats: 0,
-          total_paye: 0,
-          total_du: 0,
+          total_achats: total,
+          total_paye: paye,
+          total_du: Math.max(0, total - paye),
           derniere_vente: vente.date_vente ?? null,
         });
+      } else {
+        if (vente.client_id && !existant.client_ids.includes(vente.client_id)) existant.client_ids.push(vente.client_id);
+        existant.nombre_ventes += 1;
+        existant.total_achats += total;
+        existant.total_paye += paye;
+        existant.total_du += Math.max(0, total - paye);
+        if (vente.date_vente && (!existant.derniere_vente || vente.date_vente > existant.derniere_vente)) {
+          existant.derniere_vente = vente.date_vente;
+        }
       }
-      setClients(Array.from(groupes.values()).sort((a, b) => b.total_du - a.total_du));
+    }
+    setClients(Array.from(groupes.values()).sort((a, b) => b.total_du - a.total_du));
+
+    // Le résultat de la vue reste chargé ci-dessus uniquement pour conserver
+    // la gestion d'erreur existante, mais n'est plus utilisé pour les totaux.
+    if (clientsRes.error) {
+      console.warn("[ONYX PHARM] Vue v_synthese_clients_ventes indisponible ; synthèse calculée directement depuis ventes/paiements.", clientsRes.error);
     }
 
     setLoading(false);

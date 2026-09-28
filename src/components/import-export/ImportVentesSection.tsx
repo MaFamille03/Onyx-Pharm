@@ -100,10 +100,11 @@ type GroupeVente = {
   dateVente: string | null;
   nomClient: string;
   montantTotal: number;
+  avanceTotal: number;
+  resteExcelTotal: number | null;
   erreurs: string[];
   doublonProbable: boolean;
   valide: boolean;
-  statutImport: string;
 };
 
 type CorrectionsLigne = {
@@ -307,21 +308,6 @@ export function ImportVentesSection() {
     return null;
   }
 
-  function normaliserStatutImport(valeur: unknown): string {
-    const statut = String(valeur ?? "")
-      .trim()
-      .toLocaleLowerCase("fr-FR")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-
-    if (statut === "brouillon") return "Brouillon";
-    if (["annule", "annulee"].includes(statut)) return "Annulé";
-    if (["soldee", "paye", "payee"].includes(statut)) return "Soldée";
-    if (["avance", "partiellement paye", "partiellement payee"].includes(statut)) return "Avance";
-    if (["non payee", "non paye", "valide", "validee"].includes(statut)) return "Non payée";
-    return String(valeur ?? "").trim();
-  }
-
   function telechargerModele() {
     exporterExcelMisEnForme("Modèle_Ventes_Onyx_Pharm", "Modèle", COLONNES_MODELE, []);
   }
@@ -407,7 +393,6 @@ export function ImportVentesSection() {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ».`);
         }
         const nomClient = String(premiere.Client ?? "").trim();
-        const statutImport = normaliserStatutImport(premiere.Statut);
         const verifications: VerificationLigne[] = [];
         const lignesResolues: LigneResolue[] = [];
 
@@ -475,7 +460,7 @@ export function ImportVentesSection() {
               erreur = "Quantité invalide : indiquez une quantité supérieure à 0.";
             } else if (!modeHistorique && !emplacementId) {
               erreur = `Choisissez l'emplacement pour « ${article.designation} ».`;
-            } else if (!modeHistorique && statutImport !== "Brouillon") {
+            } else if (!modeHistorique) {
               const restant = disponible;
               if (!emplacementId || restant < quantite) {
                 const alternatives = stocksArticle.filter((s) => s.quantite >= quantite);
@@ -488,7 +473,7 @@ export function ImportVentesSection() {
 
           const besoinCorrection = Boolean(
             erreur ||
-            (!horsCatalogue && (!article || articleType === "approx" || (article && !modeHistorique && (!emplacementId || (statutImport !== "Brouillon" && disponible < quantite)))))
+            (!horsCatalogue && (!article || articleType === "approx" || (article && !modeHistorique && (!emplacementId || disponible < quantite))))
           );
 
           const verification: VerificationLigne = {
@@ -533,7 +518,7 @@ export function ImportVentesSection() {
               prix,
               hors_catalogue: false,
             });
-            if (!modeHistorique && statutImport !== "Brouillon") {
+            if (!modeHistorique) {
               const cleStock = `${articleResolue.id}|${emplacementId}`;
               quantitesReservees.set(cleStock, (quantitesReservees.get(cleStock) ?? 0) + quantite);
             }
@@ -541,7 +526,25 @@ export function ImportVentesSection() {
         }
 
         const lignesAvecErreur = verifications.filter((v) => v.erreur);
+        // Un N° BL regroupe plusieurs lignes. Le total et l'avance doivent
+        // donc être calculés sur TOUTES les lignes du BL. Dans le fichier
+        // Excel, l'avance peut être répartie sur plusieurs articles : il ne
+        // faut surtout pas prendre uniquement la première ligne.
         const montantTotal = lignesResolues.reduce((s, l) => s + l.quantite * l.prix, 0);
+        const avancesBrutes = lignesBrutes
+          .map((l) => l["Avance"])
+          .filter((valeur) => valeur !== undefined && valeur !== null && String(valeur).trim() !== "")
+          .map((valeur) => Number(valeur));
+        const avanceInvalide = avancesBrutes.some((valeur) => !Number.isFinite(valeur) || valeur < 0);
+        const avancesDuBL = avancesBrutes.reduce((s, valeur) => s + (Number.isFinite(valeur) ? valeur : 0), 0);
+        const restesRenseignes = lignesBrutes
+          .map((l) => l["Reste"])
+          .filter((valeur) => valeur !== undefined && valeur !== null && String(valeur).trim() !== "")
+          .map((valeur) => Number(valeur));
+        const resteExcelTotal = restesRenseignes.length > 0 && restesRenseignes.every(Number.isFinite)
+          ? restesRenseignes.reduce((s, valeur) => s + valeur, 0)
+          : null;
+        const resteCalcule = montantTotal - avancesDuBL;
         let doublonProbable = false;
         if (nomClient && dateVente && montantTotal > 0) {
           const clientExistant = clients.find(
@@ -571,10 +574,26 @@ export function ImportVentesSection() {
           dateVente,
           nomClient,
           montantTotal,
-          erreurs: [...erreurs, ...lignesAvecErreur.map((v) => v.erreur!).filter(Boolean)],
+          avanceTotal: avancesDuBL,
+          resteExcelTotal,
+          erreurs: [
+            ...erreurs,
+            ...lignesAvecErreur.map((v) => v.erreur!).filter(Boolean),
+            ...(avanceInvalide
+              ? ["Une ou plusieurs valeurs d'Avance sont invalides ou négatives."]
+              : []),
+            ...(restesRenseignes.some((valeur) => !Number.isFinite(valeur))
+              ? ["Une ou plusieurs valeurs de Reste ne sont pas numériques."]
+              : []),
+            ...(resteExcelTotal !== null && Math.abs(resteExcelTotal - resteCalcule) > 0.01
+              ? [`Incohérence du BL : Total (${montantTotal.toLocaleString("fr-FR")} FCFA) - Avance (${avancesDuBL.toLocaleString("fr-FR")} FCFA) = ${resteCalcule.toLocaleString("fr-FR")} FCFA, alors que le fichier indique ${resteExcelTotal.toLocaleString("fr-FR")} FCFA.`]
+              : []),
+          ],
           doublonProbable,
-          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length,
-          statutImport,
+          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length
+            && !avanceInvalide
+            && restesRenseignes.every(Number.isFinite)
+            && (resteExcelTotal === null || Math.abs(resteExcelTotal - resteCalcule) <= 0.01),
         });
       }
 
@@ -656,20 +675,39 @@ export function ImportVentesSection() {
     const { data: { user } } = await supabase.auth.getUser();
     const clientsTravail = [...clients];
     let reussies = 0;
-    let enBrouillon = 0;
     let echouees = 0;
     const erreursDetail: string[] = [];
 
+    // Règle métier : l'import est atomique par client. Si un seul article
+    // d'un client est invalide, aucun de ses BL ne doit être importé.
+    const groupesParClient = new Map<string, GroupeVente[]>();
+    for (const groupe of groupes) {
+      const cle = normaliserDesignation(groupe.nomClient || "Sans client");
+      if (!groupesParClient.has(cle)) groupesParClient.set(cle, []);
+      groupesParClient.get(cle)!.push(groupe);
+    }
+    const clientsAvecErreur = new Set<string>();
+    for (const [cle, groupesClient] of groupesParClient.entries()) {
+      if (groupesClient.some((g) => !g.valide || g.doublonProbable)) clientsAvecErreur.add(cle);
+    }
+    for (const [cle, groupesClient] of groupesParClient.entries()) {
+      const problemes = groupesClient.filter((g) => !g.valide || g.doublonProbable);
+      if (problemes.length > 0) {
+        const nom = groupesClient[0]?.nomClient || "Sans client";
+        const details = problemes.map((g) => `${g.numero}${g.doublonProbable ? " (doublon probable)" : " (BL invalide)"}`).join(", ");
+        erreursDetail.push(`Client ${nom} : aucun de ses BL ne sera importé tant que ces éléments ne sont pas valides : ${details}.`);
+      }
+    }
+
     for (const groupe of groupes) {
       setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
-      if (!groupe.valide) {
+      const cleClient = normaliserDesignation(groupe.nomClient || "Sans client");
+      if (clientsAvecErreur.has(cleClient)) {
         echouees += 1;
         continue;
       }
-
-      // Les ventes annulées ne sont jamais importées : elles ne doivent pas
-      // apparaître dans la synthèse ni dans la liste des commandes du client.
-      if (groupe.statutImport === "Annulé") {
+      if (!groupe.valide) {
+        echouees += 1;
         continue;
       }
 
@@ -681,44 +719,24 @@ export function ImportVentesSection() {
         });
       }
 
-      // Le montant de la vente est toujours calculé par ONYX PHARM à partir
-      // des lignes importées : quantité × prix de vente unitaire.
-      // L'avance n'est jamais utilisée pour recalculer le total et le reste
-      // fourni dans Excel n'est jamais pris comme source de vérité.
-      const premiere = groupe.lignesBrutes[0];
-      const avanceBrut = premiere["Avance"];
-      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === "" ? 0 : Number(avanceBrut);
-      const resteBrut = premiere["Reste"];
-      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === "" ? null : Number(resteBrut);
+      // Le total et le reste sont calculés au niveau du N° BL :
+      // Total = somme de toutes les lignes ; Avance = somme de toutes les
+      // avances des lignes ; Reste = Total - Avance.
+      const avance = groupe.avanceTotal;
       const resteCalcule = groupe.montantTotal - avance;
 
       if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
-        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}). Le total calculé est ${groupe.montantTotal.toLocaleString("fr-FR")} FCFA.`);
+        erreursDetail.push(`Vente ${groupe.numero} : avance invalide. Total calculé : ${groupe.montantTotal.toLocaleString("fr-FR")} FCFA, avance calculée : ${avance.toLocaleString("fr-FR")} FCFA.`);
         echouees += 1;
         continue;
       }
 
-      if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
-        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
+      if (groupe.resteExcelTotal !== null && Math.abs(groupe.resteExcelTotal - resteCalcule) > 0.01) {
+        erreursDetail.push(`Vente ${groupe.numero} : le reste Excel (${groupe.resteExcelTotal.toLocaleString("fr-FR")} FCFA) ne correspond pas à Total - Avance (${resteCalcule.toLocaleString("fr-FR")} FCFA).`);
         echouees += 1;
         continue;
       }
 
-      // Si le fichier contient un reste, on le contrôle contre le reste
-      // réellement calculé. Le calcul interne reste toujours prioritaire.
-      if (resteExcel !== null && Math.abs(resteExcel - resteCalcule) > 0.01) {
-        erreursDetail.push(
-          `Vente ${groupe.numero} : incohérence de paiement. Total calculé : ${groupe.montantTotal.toLocaleString("fr-FR")} FCFA, avance : ${avance.toLocaleString("fr-FR")} FCFA, reste calculé : ${resteCalcule.toLocaleString("fr-FR")} FCFA, mais le fichier indique ${resteExcel.toLocaleString("fr-FR")} FCFA.`,
-        );
-        echouees += 1;
-        continue;
-      }
-
-      // Le statut financier reste piloté par les paiements. La colonne
-      // « Statut » du fichier sert uniquement à préserver le brouillon et à
-      // exclure les ventes annulées ; Soldée / Avance / Non payée sont
-      // reconstitués à partir du montant d'avance réellement enregistré.
-      const estBrouillonImport = groupe.statutImport === "Brouillon";
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
       if (refError || !refData) {
         erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
@@ -761,26 +779,25 @@ export function ImportVentesSection() {
       );
 
       if (lignesError) {
-        erreursDetail.push(`Vente ${groupe.numero} : lignes non enregistrées.`);
+        await supabase.from("ventes").delete().eq("id", vente.id);
+        erreursDetail.push(`Vente ${groupe.numero} : lignes non enregistrées ; aucune vente partielle n'a été conservée.`);
         echouees += 1;
         continue;
       }
 
       const prixManquant = groupe.lignesResolues.some((l) => !l.prix || l.prix <= 0);
       if (prixManquant) {
-        enBrouillon += 1;
+        erreursDetail.push(`Vente ${groupe.numero} : prix de vente invalide, import annulé pour ce BL.`);
+        echouees += 1;
         continue;
       }
 
-      if (estBrouillonImport) {
-        // Le brouillon reste volontairement non validé : aucun mouvement de
-        // stock ne doit être créé pour une commande encore en brouillon.
-        enBrouillon += 1;
-      } else if (modeHistorique) {
+      if (modeHistorique) {
         const { error: majStatutError } = await supabase.from("ventes").update({ statut: "Validé" }).eq("id", vente.id);
         if (majStatutError) {
-          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée.`);
-          enBrouillon += 1;
+          await supabase.from("ventes").delete().eq("id", vente.id);
+          erreursDetail.push(`Vente ${groupe.numero} : validation impossible ; aucune vente en brouillon n'a été conservée.`);
+          echouees += 1;
           continue;
         }
         await supabase.from("historique").insert({
@@ -796,21 +813,38 @@ export function ImportVentesSection() {
           p_utilisateur_id: user?.id ?? null,
         });
         if (validationError) {
-          erreursDetail.push(`Vente ${groupe.numero} créée en brouillon, mais non validée : ${validationError.message}`);
-          enBrouillon += 1;
+          await supabase.from("ventes").delete().eq("id", vente.id);
+          erreursDetail.push(`Vente ${groupe.numero} : validation impossible ; aucune vente en brouillon n'a été conservée : ${validationError.message}`);
+          echouees += 1;
           continue;
         }
       }
 
       if (avance > 0) {
-        const { error: paiementError } = await supabase.from("paiements_ventes").insert({
-          vente_id: vente.id,
-          montant: avance,
-          mode_paiement: String(premiere["Mode de paiement"] ?? "").trim() || "Espèces",
-          date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
-          created_by: user?.id ?? null,
-        });
-        if (paiementError) erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+        // Une avance peut être répartie sur plusieurs lignes du même BL.
+        // On reconstitue les paiements par mode afin de ne perdre aucun montant.
+        const avancesParMode = new Map<string, number>();
+        for (const ligne of groupe.lignesBrutes) {
+          const valeur = ligne["Avance"];
+          if (valeur === undefined || valeur === null || String(valeur).trim() === "") continue;
+          const montant = Number(valeur);
+          if (!Number.isFinite(montant) || montant <= 0) continue;
+          const mode = String(ligne["Mode de paiement"] ?? "").trim() || "Espèces";
+          avancesParMode.set(mode, (avancesParMode.get(mode) ?? 0) + montant);
+        }
+
+        for (const [mode, montant] of avancesParMode.entries()) {
+          const { error: paiementError } = await supabase.from("paiements_ventes").insert({
+            vente_id: vente.id,
+            montant,
+            mode_paiement: mode,
+            date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
+            created_by: user?.id ?? null,
+          });
+          if (paiementError) {
+            erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+          }
+        }
       }
       reussies += 1;
     }
@@ -819,7 +853,6 @@ export function ImportVentesSection() {
     setResultatErreur(echouees > 0);
     setResultat(
       `${reussies} vente(s) validée(s)` +
-      (enBrouillon > 0 ? `, ${enBrouillon} laissée(s) en brouillon (prix manquant)` : "") +
       (echouees > 0 ? `, ${echouees} échec(s) ou ignorée(s)` : "") +
       "." +
       (erreursDetail.length > 0 ? " Détail : " + erreursDetail.join(" | ") : ""),
