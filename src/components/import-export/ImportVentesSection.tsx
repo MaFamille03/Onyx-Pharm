@@ -657,6 +657,42 @@ export function ImportVentesSection() {
         });
       }
 
+      // Le montant de la vente est toujours calculé par ONYX PHARM à partir
+      // des lignes importées : quantité × prix de vente unitaire.
+      // L'avance n'est jamais utilisée pour recalculer le total et le reste
+      // fourni dans Excel n'est jamais pris comme source de vérité.
+      const premiere = groupe.lignesBrutes[0];
+      const avanceBrut = premiere["Avance"];
+      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === "" ? 0 : Number(avanceBrut);
+      const resteBrut = premiere["Reste"];
+      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === "" ? null : Number(resteBrut);
+      const resteCalcule = groupe.montantTotal - avance;
+
+      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
+        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}). Le total calculé est ${groupe.montantTotal.toLocaleString("fr-FR")} FCFA.`);
+        echouees += 1;
+        continue;
+      }
+
+      if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
+        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
+        echouees += 1;
+        continue;
+      }
+
+      // Si le fichier contient un reste, on le contrôle contre le reste
+      // réellement calculé. Le calcul interne reste toujours prioritaire.
+      if (resteExcel !== null && Math.abs(resteExcel - resteCalcule) > 0.01) {
+        erreursDetail.push(
+          `Vente ${groupe.numero} : incohérence de paiement. Total calculé : ${groupe.montantTotal.toLocaleString("fr-FR")} FCFA, avance : ${avance.toLocaleString("fr-FR")} FCFA, reste calculé : ${resteCalcule.toLocaleString("fr-FR")} FCFA, mais le fichier indique ${resteExcel.toLocaleString("fr-FR")} FCFA.`,
+        );
+        echouees += 1;
+        continue;
+      }
+
+      // Le statut financier est ensuite déterminé par le système de ventes :
+      // reste = 0 → paiement complet → « Payé » ; reste > 0 et avance > 0
+      // → « Partiellement payé » ; avance = 0 → « Validé ».
       const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
       if (refError || !refData) {
         erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
@@ -736,16 +772,6 @@ export function ImportVentesSection() {
         }
       }
 
-      const premiere = groupe.lignesBrutes[0];
-      const avanceBrut = premiere["Avance"];
-      const avance = avanceBrut === undefined || avanceBrut === null || String(avanceBrut).trim() === "" ? 0 : Number(avanceBrut);
-      const resteBrut = premiere["Reste"];
-      const resteExcel = resteBrut === undefined || resteBrut === null || String(resteBrut).trim() === "" ? null : Number(resteBrut);
-      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
-        erreursDetail.push(`Vente ${groupe.numero} : avance invalide (${String(avanceBrut)}).`);
-      } else if (resteExcel !== null && (!Number.isFinite(resteExcel) || resteExcel < 0)) {
-        erreursDetail.push(`Vente ${groupe.numero} : reste invalide (${String(resteBrut)}).`);
-      }
       if (avance > 0) {
         const { error: paiementError } = await supabase.from("paiements_ventes").insert({
           vente_id: vente.id,
