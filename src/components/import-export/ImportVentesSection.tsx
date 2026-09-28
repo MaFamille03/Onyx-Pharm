@@ -690,7 +690,8 @@ export function ImportVentesSection() {
     for (const [cle, groupesClient] of groupesParClient.entries()) {
       if (groupesClient.some((g) => !g.valide || g.doublonProbable)) clientsAvecErreur.add(cle);
     }
-    for (const [cle, groupesClient] of groupesParClient.entries()) {
+
+    for (const groupesClient of groupesParClient.values()) {
       const problemes = groupesClient.filter((g) => !g.valide || g.doublonProbable);
       if (problemes.length > 0) {
         const nom = groupesClient[0]?.nomClient || "Sans client";
