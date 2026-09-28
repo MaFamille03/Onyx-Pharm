@@ -691,14 +691,14 @@ export function ImportVentesSection() {
       if (groupesClient.some((g) => !g.valide || g.doublonProbable)) clientsAvecErreur.add(cle);
     });
 
-    for (const groupesClient of groupesParClient.values()) {
+    groupesParClient.forEach((groupesClient) => {
       const problemes = groupesClient.filter((g) => !g.valide || g.doublonProbable);
       if (problemes.length > 0) {
         const nom = groupesClient[0]?.nomClient || "Sans client";
         const details = problemes.map((g) => `${g.numero}${g.doublonProbable ? " (doublon probable)" : " (BL invalide)"}`).join(", ");
         erreursDetail.push(`Client ${nom} : aucun de ses BL ne sera importé tant que ces éléments ne sont pas valides : ${details}.`);
       }
-    }
+    });
 
     for (const groupe of groupes) {
       setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
