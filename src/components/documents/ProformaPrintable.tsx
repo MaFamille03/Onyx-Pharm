@@ -24,6 +24,11 @@ function formatDate(date: Date) {
   });
 }
 
+function formatDateInput(value: string, fallbackDate: Date) {
+  const date = value ? new Date(`${value}T00:00:00`) : fallbackDate;
+  return formatDate(date);
+}
+
 export function ProformaPrintable({
   reference,
   clientNom,
@@ -50,8 +55,15 @@ export function ProformaPrintable({
     (s, l) => s + Number(l.quantite || 0) * Number(l.prixUnitaireHT || 0),
     0
   );
+  const remise = 0;
+  const montantNetHT = Math.max(0, totalHT - remise);
+  const montantTVA = montantNetHT * 0.18;
+  const totalTTC = montantNetHT + montantTVA;
 
   const dateEmission = new Date();
+  const dateValidite = validiteOffre
+    ? formatDateInput(validiteOffre, dateEmission)
+    : formatDate(new Date(dateEmission.getTime() + 15 * 24 * 60 * 60 * 1000));
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-onyx-950/60">
@@ -89,7 +101,7 @@ export function ProformaPrintable({
             className="h-auto w-[54mm] object-contain"
           />
           <div className="ml-[16mm] mt-1.5">
-            <p className="text-[7.5px] leading-[1.35] text-onyx-700">
+            <p className="text-[9px] leading-[1.45] text-onyx-700">
               Matériel Biomédical - Consommables
               <br />
               Instruments Chirurgicaux Dentaires et Orthopédiques
@@ -116,15 +128,15 @@ export function ProformaPrintable({
           <div className="border-b-[1.5px] border-onyx-800 pb-3">
             <div className="flex items-end justify-between gap-6">
               <div>
-                <p className="text-[19px] font-bold uppercase tracking-[0.08em] text-onyx-900">
+                <p className="text-[22px] font-bold uppercase tracking-[0.08em] text-onyx-900">
                   PROFORMA
                 </p>
-                <p className="mt-1 text-[9px] uppercase tracking-wide text-onyx-500">
+                <p className="mt-1 text-[10px] uppercase tracking-wide text-onyx-500">
                   Offre commerciale
                 </p>
               </div>
 
-              <div className="text-right text-[10px] leading-5">
+              <div className="text-right text-[11px] leading-5">
                 <p>
                   <span className="font-semibold">Référence :</span>{" "}
                   {reference || "—"}
@@ -139,24 +151,24 @@ export function ProformaPrintable({
 
           <section className="mt-5 grid grid-cols-[1fr_1fr] gap-5">
             <div className="rounded-sm border border-onyx-200 px-3 py-2.5">
-              <p className="text-[8px] font-bold uppercase tracking-wide text-onyx-500">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-onyx-500">
                 Client
               </p>
-              <p className="mt-1 text-[12px] font-semibold text-onyx-900">
+              <p className="mt-1 text-[13px] font-semibold text-onyx-900">
                 {clientNom || "—"}
               </p>
               {clientAdresse && (
-                <p className="mt-0.5 text-[9px] leading-4 text-onyx-600">
+                <p className="mt-0.5 text-[10px] leading-4 text-onyx-600">
                   {clientAdresse}
                 </p>
               )}
             </div>
 
             <div className="rounded-sm border border-onyx-200 px-3 py-2.5">
-              <p className="text-[8px] font-bold uppercase tracking-wide text-onyx-500">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-onyx-500">
                 Conditions commerciales
               </p>
-              <div className="mt-1.5 space-y-1 text-[9px]">
+              <div className="mt-1.5 space-y-1 text-[10px]">
                 <p>
                   <span className="font-semibold">Livraison :</span>{" "}
                   {delaiLivraison || "À convenir"}
@@ -177,19 +189,19 @@ export function ProformaPrintable({
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-onyx-800 text-white">
-                  <th className="border border-onyx-800 px-2.5 py-2 text-left text-[9px] font-semibold">
+                  <th className="border border-onyx-800 px-2.5 py-2 text-left text-[10px] font-semibold">
                     Désignation
                   </th>
-                  <th className="w-[18mm] border border-onyx-800 px-2 py-2 text-center text-[9px] font-semibold">
+                  <th className="w-[18mm] border border-onyx-800 px-2 py-2 text-center text-[10px] font-semibold">
                     Qté
                   </th>
-                  <th className="w-[25mm] border border-onyx-800 px-2 py-2 text-center text-[9px] font-semibold">
+                  <th className="w-[25mm] border border-onyx-800 px-2 py-2 text-center text-[10px] font-semibold">
                     Unité
                   </th>
-                  <th className="w-[35mm] border border-onyx-800 px-2 py-2 text-right text-[9px] font-semibold">
+                  <th className="w-[35mm] border border-onyx-800 px-2 py-2 text-right text-[10px] font-semibold">
                     Prix unitaire
                   </th>
-                  <th className="w-[40mm] border border-onyx-800 px-2 py-2 text-right text-[9px] font-semibold">
+                  <th className="w-[40mm] border border-onyx-800 px-2 py-2 text-right text-[10px] font-semibold">
                     Montant
                   </th>
                 </tr>
@@ -202,68 +214,66 @@ export function ProformaPrintable({
 
                   return (
                     <tr key={`${ligne.designation}-${index}`}>
-                      <td className="border border-onyx-200 px-2.5 py-2 text-[10px]">
+                      <td className="border border-onyx-200 px-2.5 py-2 text-[11px]">
                         {ligne.designation}
                       </td>
-                      <td className="border border-onyx-200 px-2 py-2 text-center text-[10px]">
+                      <td className="border border-onyx-200 px-2 py-2 text-center text-[11px]">
                         {ligne.quantite}
                       </td>
                       <td className="border border-onyx-200 px-2 py-2 text-center text-[10px]">
-                        {ligne.unite || "Pce"}
+                        {ligne.unite || "Pcs"}
                       </td>
-                      <td className="border border-onyx-200 px-2 py-2 text-right text-[10px]">
+                      <td className="border border-onyx-200 px-2 py-2 text-right text-[11px]">
                         {formatMontant(ligne.prixUnitaireHT)}
                       </td>
-                      <td className="border border-onyx-200 px-2 py-2 text-right text-[10px] font-semibold">
+                      <td className="border border-onyx-200 px-2 py-2 text-right text-[11px] font-semibold">
                         {formatMontant(montant)}
                       </td>
                     </tr>
                   );
                 })}
 
-                {Array.from({
-                  length: Math.max(0, Math.min(7, 7 - lignes.length)),
-                }).map((_, index) => (
-                  <tr key={`vide-${index}`} className="h-[9mm]">
-                    <td className="border border-onyx-200" />
-                    <td className="border border-onyx-200" />
-                    <td className="border border-onyx-200" />
-                    <td className="border border-onyx-200" />
-                    <td className="border border-onyx-200" />
-                  </tr>
-                ))}
               </tbody>
             </table>
           </section>
 
           <section className="mt-5 flex justify-end">
-            <div className="w-[76mm] border-t-[1.5px] border-onyx-800 pt-2.5">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="font-semibold">TOTAL PROFORMA</span>
-                <span className="text-[13px] font-bold">
-                  {formatMontant(totalHT)}
-                </span>
+            <div className="w-[82mm] border-t-[1.5px] border-onyx-800 pt-2.5">
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">Montant HT</span>
+                  <span>{formatMontant(totalHT)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">Remise</span>
+                  <span>{formatMontant(remise)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">TVA (18 %)</span>
+                  <span>{formatMontant(montantTVA)}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between border-t border-onyx-300 pt-2">
+                  <span className="text-[12px] font-bold">TOTAL TTC</span>
+                  <span className="text-[15px] font-bold">{formatMontant(totalTTC)}</span>
+                </div>
               </div>
             </div>
           </section>
 
           <section className="mt-5 border border-onyx-200 px-3 py-2.5">
-            <p className="text-[8px] font-bold uppercase tracking-wide text-onyx-500">
+            <p className="text-[9px] font-bold uppercase tracking-wide text-onyx-500">
               Observations
             </p>
-            <p className="mt-1 text-[9px] leading-4 text-onyx-600">
-              Le présent document constitue une offre proforma et ne vaut pas
-              facture. Les quantités, prix et conditions indiqués sont ceux de
-              l&apos;offre présentée à la date d&apos;émission.
+            <p className="mt-1 text-[10px] leading-5 text-onyx-600">
+              Le présent document est une facture proforma établie à titre d&apos;offre de prix ; il ne vaut pas facture définitive. Les quantités, prix et conditions indiqués sont ceux en vigueur à la date d&apos;émission et restent valables jusqu&apos;au {dateValidite}.
             </p>
           </section>
 
           <section className="mt-7 flex items-end justify-between">
-            <div className="text-[9px] text-onyx-600">
-              <p className="font-semibold">Pour ONYX Pharm Sarl</p>
+            <div className="text-[10px] text-onyx-600">
               {emisPar && <p className="mt-1">Émis par : {emisPar}</p>}
             </div>
-            <div className="w-[48mm] border-t border-onyx-400 pt-1 text-center text-[9px] text-onyx-500">
+            <div className="w-[48mm] border-t border-onyx-400 pt-1 text-center text-[10px] text-onyx-500">
               Signature et cachet
             </div>
           </section>
