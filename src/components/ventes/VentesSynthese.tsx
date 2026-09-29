@@ -20,6 +20,13 @@ type ClientSynthese = {
   derniere_vente: string | null;
 };
 
+type Relation<T> = T | T[] | null;
+
+const relationUnique = <T,>(relation: Relation<T>): T | null => {
+  if (Array.isArray(relation)) return relation[0] ?? null;
+  return relation ?? null;
+};
+
 type VentePeriode = {
   id: string;
   client_id: string | null;
@@ -29,13 +36,13 @@ type VentePeriode = {
   montant_paye: number;
   statut: string;
   observation?: string | null;
-  clients: {
+  clients: Relation<{
     nom: string;
     telephone?: string | null;
     email?: string | null;
     adresse?: string | null;
     observations?: string | null;
-  }[] | null;
+  }>;
 };
 
 type PaiementPeriode = {
@@ -56,8 +63,8 @@ type LigneCommande = {
   montant_ligne: number;
   marge_ligne: number;
   remise: number;
-  articles: { designation: string }[] | null;
-  emplacements: { nom: string }[] | null;
+  articles: Relation<{ designation: string }>;
+  emplacements: Relation<{ nom: string }>;
   designation_hors_catalogue: string | null;
   hors_catalogue: boolean;
 };
@@ -165,7 +172,8 @@ export function VentesSynthese() {
     const groupes = new Map<string, ClientSynthese>();
     for (const vente of toutesVentes) {
       if (!vente.client_id) continue;
-      const nom = vente.clients?.[0]?.nom?.trim();
+      const client = relationUnique(vente.clients);
+      const nom = client?.nom?.trim();
       if (!nom) continue;
       const total = Number(vente.montant_total || 0);
       const paye = paiementsParVente.get(vente.id) ?? 0;
@@ -310,7 +318,7 @@ export function VentesSynthese() {
     for (const v of ventes) {
       if (!v.client_id) continue;
       const key = v.client_id;
-      const nomClient = v.clients?.[0]?.nom?.trim();
+      const nomClient = relationUnique(v.clients)?.nom?.trim();
       if (!nomClient) continue;
       const actuel = map.get(key) ?? {
         nom: nomClient,
@@ -502,10 +510,10 @@ export function VentesSynthese() {
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <div><p className="text-[11px] uppercase tracking-wide text-onyx-400">Référence</p><p className="mt-0.5 font-semibold text-onyx-800">{v.reference}</p></div>
                             <div><p className="text-[11px] uppercase tracking-wide text-onyx-400">Date de vente</p><p className="mt-0.5 font-semibold text-onyx-800">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</p></div>
-                            <div><p className="text-[11px] uppercase tracking-wide text-onyx-400">Client</p><p className="mt-0.5 font-semibold text-onyx-800">{v.clients?.[0]?.nom || "Client de passage"}</p></div>
-                            <div><p className="text-[11px] uppercase tracking-wide text-onyx-400">Téléphone</p><p className="mt-0.5 text-onyx-700">{v.clients?.[0]?.telephone || "—"}</p></div>
-                            <div className="sm:col-span-2"><p className="text-[11px] uppercase tracking-wide text-onyx-400">Adresse / e-mail</p><p className="mt-0.5 break-words text-onyx-700">{v.clients?.[0]?.adresse || "—"}{v.clients?.[0]?.email ? ` · ${v.clients[0].email}` : ""}</p></div>
-                            {v.clients?.[0]?.observations && <div className="sm:col-span-2"><p className="text-[11px] uppercase tracking-wide text-onyx-400">Observation client</p><p className="mt-0.5 break-words text-onyx-700">{v.clients[0].observations}</p></div>}
+                            <div><p className="text-[11px] uppercase tracking-wide text-onyx-400">Client</p><p className="mt-0.5 font-semibold text-onyx-800">{relationUnique(v.clients)?.nom || "Client de passage"}</p></div>
+                            <div><p className="text-[11px] uppercase tracking-wide text-onyx-400">Téléphone</p><p className="mt-0.5 text-onyx-700">{relationUnique(v.clients)?.telephone || "—"}</p></div>
+                            <div className="sm:col-span-2"><p className="text-[11px] uppercase tracking-wide text-onyx-400">Adresse / e-mail</p><p className="mt-0.5 break-words text-onyx-700">{relationUnique(v.clients)?.adresse || "—"}{relationUnique(v.clients)?.email ? ` · ${relationUnique(v.clients)?.email}` : ""}</p></div>
+                            {relationUnique(v.clients)?.observations && <div className="sm:col-span-2"><p className="text-[11px] uppercase tracking-wide text-onyx-400">Observation client</p><p className="mt-0.5 break-words text-onyx-700">{relationUnique(v.clients)?.observations}</p></div>}
                             {v.observation && <div className="sm:col-span-2"><p className="text-[11px] uppercase tracking-wide text-onyx-400">Observation de la facture</p><p className="mt-0.5 break-words text-onyx-700">{v.observation}</p></div>}
                           </div>
                         </div>
@@ -525,7 +533,7 @@ export function VentesSynthese() {
                                   {lignesCommande.map((ligne) => {
                                     const prix = Number(ligne.prix_vente_reel) || 0; const quantite = Number(ligne.quantite) || 0; const remise = Number(ligne.remise) || 0; const sousTotal = Number(ligne.montant_ligne ?? Math.max(0, quantite * prix - remise));
                                     const prixAchat = Number(ligne.prix_achat_reference) || 0; const prixConseil = Number(ligne.prix_vente_conseille_reference) || 0; const marge = Number(ligne.marge_ligne ?? (quantite * (prix - prixAchat) - remise));
-                                    return <tr key={ligne.id}><td className="px-3 py-2 font-medium text-onyx-800">{ligne.hors_catalogue ? (ligne.designation_hors_catalogue || "Article hors catalogue") : (ligne.articles?.[0]?.designation || "Article enregistré")}</td><td className="px-3 py-2 text-right text-onyx-500">{quantite}</td><td className="px-3 py-2 text-right text-onyx-400">{fcfa(prixAchat)}</td><td className="px-3 py-2 text-right text-onyx-400">{fcfa(prixConseil)}</td><td className="px-3 py-2 text-right text-onyx-500">{fcfa(prix)}</td><td className="px-3 py-2 text-right text-onyx-500">{fcfa(remise)}</td><td className="px-3 py-2 text-right font-semibold text-onyx-800">{fcfa(sousTotal)}</td><td className={`px-3 py-2 text-right font-semibold ${marge >= 0 ? "text-emerald-600" : "text-red-600"}`}>{fcfa(marge)}</td><td className="px-3 py-2 text-onyx-500">{ligne.hors_catalogue ? "—" : (ligne.emplacements?.[0]?.nom || "—")}</td></tr>;
+                                    return <tr key={ligne.id}><td className="px-3 py-2 font-medium text-onyx-800">{ligne.hors_catalogue ? (ligne.designation_hors_catalogue || "Article hors catalogue") : (relationUnique(ligne.articles)?.designation || "Article enregistré")}</td><td className="px-3 py-2 text-right text-onyx-500">{quantite}</td><td className="px-3 py-2 text-right text-onyx-400">{fcfa(prixAchat)}</td><td className="px-3 py-2 text-right text-onyx-400">{fcfa(prixConseil)}</td><td className="px-3 py-2 text-right text-onyx-500">{fcfa(prix)}</td><td className="px-3 py-2 text-right text-onyx-500">{fcfa(remise)}</td><td className="px-3 py-2 text-right font-semibold text-onyx-800">{fcfa(sousTotal)}</td><td className={`px-3 py-2 text-right font-semibold ${marge >= 0 ? "text-emerald-600" : "text-red-600"}`}>{fcfa(marge)}</td><td className="px-3 py-2 text-onyx-500">{ligne.hors_catalogue ? "—" : (relationUnique(ligne.emplacements)?.nom || "—")}</td></tr>;
                                   })}
                                 </tbody>
                               </table>
