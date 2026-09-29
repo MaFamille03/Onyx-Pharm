@@ -254,7 +254,7 @@ export function ProformaPrintable({
             <p className="mt-1 text-[9px] leading-4 text-onyx-600">
               Le présent document constitue une offre proforma et ne vaut pas
               facture. Les quantités, prix et conditions indiqués sont ceux de
-              l&apos;offre présentée à la date d'émission.
+              l&apos;offre présentée à la date d&apos;émission.
             </p>
           </section>
 
