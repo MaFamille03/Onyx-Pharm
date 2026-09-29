@@ -254,7 +254,7 @@ export function ProformaPrintable({
             <p className="mt-1 text-[9px] leading-4 text-onyx-600">
               Le présent document constitue une offre proforma et ne vaut pas
               facture. Les quantités, prix et conditions indiqués sont ceux de
-              l'offre présentée à la date d'émission.
+              l&apos;offre présentée à la date d'émission.
             </p>
           </section>
 
@@ -276,7 +276,7 @@ export function ProformaPrintable({
             villa 222, non loin de la pharmacie du Bonheur
           </p>
           <p>
-            Centre des impôts : RIVIERA 2 · Régime d'imposition : RME ·
+            Centre des impôts : RIVIERA 2 · Régime d&apos;imposition : RME ·
             CC N° : 1317450 T
           </p>
           <p>

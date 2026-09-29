@@ -767,7 +767,7 @@ function ProformaOptionsModal({
 
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-            Validité de l'offre
+            Validité de l&apos;offre
           </label>
           <input
             value={validiteOffre}
