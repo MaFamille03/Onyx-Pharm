@@ -834,7 +834,7 @@ export function ImportVentesSection() {
           avancesParMode.set(mode, (avancesParMode.get(mode) ?? 0) + montant);
         }
 
-        for (const [mode, montant] of avancesParMode.entries()) {
+        for (const [mode, montant] of Array.from(avancesParMode.entries())) {
           const { error: paiementError } = await supabase.from("paiements_ventes").insert({
             vente_id: vente.id,
             montant,
