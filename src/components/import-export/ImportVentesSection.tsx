@@ -17,7 +17,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { logSupabaseError } from "@/lib/errors";
 import { exporterExcelMisEnForme, lireFichierExcel } from "@/lib/excel";
-import { normaliser, trouverOuCreer } from "@/lib/normaliser";
+import { normaliser } from "@/lib/normaliser";
 import { PrimaryButton, SecondaryButton } from "@/components/ui/Buttons";
 import { InlineBanner } from "@/components/ui/Badges";
 import { useReferenceData } from "@/lib/hooks/useReferenceData";
