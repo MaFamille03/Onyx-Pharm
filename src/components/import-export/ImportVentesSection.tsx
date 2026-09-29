@@ -393,6 +393,24 @@ export function ImportVentesSection() {
           erreurs.push(`Date de vente invalide : « ${String(valeurDateVente)} ».`);
         }
         const nomClient = String(premiere.Client ?? "").trim();
+        const clientsDuBL = lignesBrutes
+          .map((ligne) => String(ligne.Client ?? "").trim())
+          .filter(Boolean);
+        const datesDuBL = lignesBrutes
+          .map((ligne) => convertirDateImport(ligne["Date de vente"]))
+          .filter((date): date is string => Boolean(date));
+        if (!nomClient) {
+          erreurs.push("Client manquant : chaque BL doit être rattaché à un client.");
+        }
+        if (clientsDuBL.some((nom) => normaliserDesignation(nom) !== normaliserDesignation(nomClient))) {
+          const noms = Array.from(new Set(clientsDuBL));
+          erreurs.push(`Le BL ${numero} contient plusieurs clients (${noms.join(" / ")}). Un même N° BL doit correspondre à un seul client.`);
+        }
+        if (!dateVente) {
+          erreurs.push(`Date de vente manquante ou invalide pour le BL ${numero}.`);
+        } else if (datesDuBL.some((date) => date !== dateVente)) {
+          erreurs.push(`Le BL ${numero} contient plusieurs dates de vente. Un même N° BL doit correspondre à une seule date.`);
+        }
         const verifications: VerificationLigne[] = [];
         const lignesResolues: LigneResolue[] = [];
 
@@ -590,7 +608,7 @@ export function ImportVentesSection() {
               : []),
           ],
           doublonProbable,
-          valide: erreurs.length === 0 && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length
+          valide: erreurs.length === 0 && Boolean(nomClient) && Boolean(dateVente) && lignesAvecErreur.length === 0 && lignesResolues.length === lignesBrutes.length
             && !avanceInvalide
             && restesRenseignes.every(Number.isFinite)
             && (resteExcelTotal === null || Math.abs(resteExcelTotal - resteCalcule) <= 0.01),
@@ -672,197 +690,81 @@ export function ImportVentesSection() {
     setProgression({ actuel: 0, total: groupes.length });
     setErreurGenerale(null);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    const clientsTravail = [...clients];
-    let reussies = 0;
-    let echouees = 0;
-    const erreursDetail: string[] = [];
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Votre session utilisateur est expirée. Reconnectez-vous avant l'import.");
 
-    // Règle métier : l'import est atomique par client. Si un seul article
-    // d'un client est invalide, aucun de ses BL ne doit être importé.
-    const groupesParClient = new Map<string, GroupeVente[]>();
-    for (const groupe of groupes) {
-      const cle = normaliserDesignation(groupe.nomClient || "Sans client");
-      if (!groupesParClient.has(cle)) groupesParClient.set(cle, []);
-      groupesParClient.get(cle)!.push(groupe);
-    }
-    const clientsAvecErreur = new Set<string>();
-    groupesParClient.forEach((groupesClient, cle) => {
-      if (groupesClient.some((g) => !g.valide || g.doublonProbable)) clientsAvecErreur.add(cle);
-    });
-
-    groupesParClient.forEach((groupesClient) => {
-      const problemes = groupesClient.filter((g) => !g.valide || g.doublonProbable);
-      if (problemes.length > 0) {
-        const nom = groupesClient[0]?.nomClient || "Sans client";
-        const details = problemes.map((g) => `${g.numero}${g.doublonProbable ? " (doublon probable)" : " (BL invalide)"}`).join(", ");
-        erreursDetail.push(`Client ${nom} : aucun de ses BL ne sera importé tant que ces éléments ne sont pas valides : ${details}.`);
-      }
-    });
-
-    for (const groupe of groupes) {
-      setProgression((p) => ({ ...p, actuel: p.actuel + 1 }));
-      const cleClient = normaliserDesignation(groupe.nomClient || "Sans client");
-      if (clientsAvecErreur.has(cleClient)) {
-        echouees += 1;
-        continue;
-      }
-      if (!groupe.valide) {
-        echouees += 1;
-        continue;
+      const invalides = groupes.filter((g) => !g.valide || g.doublonProbable);
+      if (invalides.length > 0) {
+        throw new Error(`Impossible d'importer : ${invalides.length} BL/facture(s) nécessitent encore une correction.`);
       }
 
-      let clientId: string | null = null;
-      if (groupe.nomClient) {
-        clientId = await trouverOuCreer(groupe.nomClient, clientsTravail, async (nomSaisi) => {
-          const { data } = await supabase.from("clients").insert({ nom: nomSaisi }).select("id, nom").single();
-          return data;
-        });
-      }
-
-      // Le total et le reste sont calculés au niveau du N° BL :
-      // Total = somme de toutes les lignes ; Avance = somme de toutes les
-      // avances des lignes ; Reste = Total - Avance.
-      const avance = groupe.avanceTotal;
-      const resteCalcule = groupe.montantTotal - avance;
-
-      if (!Number.isFinite(avance) || avance < 0 || avance > groupe.montantTotal) {
-        erreursDetail.push(`Vente ${groupe.numero} : avance invalide. Total calculé : ${groupe.montantTotal.toLocaleString("fr-FR")} FCFA, avance calculée : ${avance.toLocaleString("fr-FR")} FCFA.`);
-        echouees += 1;
-        continue;
-      }
-
-      if (groupe.resteExcelTotal !== null && Math.abs(groupe.resteExcelTotal - resteCalcule) > 0.01) {
-        erreursDetail.push(`Vente ${groupe.numero} : le reste Excel (${groupe.resteExcelTotal.toLocaleString("fr-FR")} FCFA) ne correspond pas à Total - Avance (${resteCalcule.toLocaleString("fr-FR")} FCFA).`);
-        echouees += 1;
-        continue;
-      }
-
-      const { data: refData, error: refError } = await supabase.rpc("generer_numero_document", { p_prefixe: "FAC" });
-      if (refError || !refData) {
-        erreursDetail.push(`Vente ${groupe.numero} : impossible de générer une référence.`);
-        echouees += 1;
-        continue;
-      }
-
-      const { data: vente, error: venteError } = await supabase
-        .from("ventes")
-        .insert({
-          reference: refData,
-          client_id: clientId,
-          date_vente: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
-          montant_total: groupe.montantTotal,
-          statut: "Brouillon",
-          created_by: user?.id ?? null,
-        })
-        .select("id")
-        .single();
-
-      if (venteError || !vente) {
-        erreursDetail.push(logSupabaseError({ table: "ventes", operation: "insert (import Excel)" }, venteError, `Vente ${groupe.numero} : impossible de la créer.`));
-        echouees += 1;
-        continue;
-      }
-
-      const { error: lignesError } = await supabase.from("lignes_ventes").insert(
-        groupe.lignesResolues.map((l) => ({
-          vente_id: vente.id,
-          article_id: l.hors_catalogue ? null : l.article_id,
-          emplacement_id: l.hors_catalogue ? null : l.emplacement_id,
-          quantite: l.quantite,
-          prix_achat_reference: 0,
-          prix_vente_conseille_reference: l.prix,
-          prix_vente_reel: l.prix,
+      // Le serveur reçoit tout le fichier en une seule opération PostgreSQL.
+      // Une erreur sur un seul BL annule toute la transaction : aucun client,
+      // aucune facture, aucune ligne, aucun paiement et aucun mouvement de
+      // stock ne reste partiellement créé.
+      const payload = groupes.map((groupe) => ({
+        numero: groupe.numero,
+        nom_client: groupe.nomClient,
+        date_vente: groupe.dateVente,
+        reste_excel: groupe.resteExcelTotal,
+        observation: String(groupe.lignesBrutes[0]?.["Observation"] ?? "").trim() || null,
+        lignes: groupe.lignesResolues.map((ligne) => ({
+          article_id: ligne.article_id,
+          emplacement_id: ligne.emplacement_id,
+          quantite: ligne.quantite,
+          prix: ligne.prix,
           remise: 0,
-          designation_hors_catalogue: l.hors_catalogue ? l.designation : null,
-          hors_catalogue: l.hors_catalogue,
+          hors_catalogue: ligne.hors_catalogue,
+          designation: ligne.designation,
         })),
-      );
-
-      if (lignesError) {
-        await supabase.from("ventes").delete().eq("id", vente.id);
-        erreursDetail.push(`Vente ${groupe.numero} : lignes non enregistrées ; aucune vente partielle n'a été conservée.`);
-        echouees += 1;
-        continue;
-      }
-
-      const prixManquant = groupe.lignesResolues.some((l) => !l.prix || l.prix <= 0);
-      if (prixManquant) {
-        erreursDetail.push(`Vente ${groupe.numero} : prix de vente invalide, import annulé pour ce BL.`);
-        echouees += 1;
-        continue;
-      }
-
-      if (modeHistorique) {
-        const { error: majStatutError } = await supabase.from("ventes").update({ statut: "Validé" }).eq("id", vente.id);
-        if (majStatutError) {
-          await supabase.from("ventes").delete().eq("id", vente.id);
-          erreursDetail.push(`Vente ${groupe.numero} : validation impossible ; aucune vente en brouillon n'a été conservée.`);
-          echouees += 1;
-          continue;
-        }
-        await supabase.from("historique").insert({
-          utilisateur_id: user?.id ?? null,
-          action: "validation",
-          table_cible: "ventes",
-          enregistrement_id: vente.id,
-          description: `Vente historique ${refData} importée et validée sans impact sur le stock actuel (antérieure au suivi de stock).`,
-        });
-      } else {
-        const { error: validationError } = await supabase.rpc("valider_vente", {
-          p_vente_id: vente.id,
-          p_utilisateur_id: user?.id ?? null,
-        });
-        if (validationError) {
-          await supabase.from("ventes").delete().eq("id", vente.id);
-          erreursDetail.push(`Vente ${groupe.numero} : validation impossible ; aucune vente en brouillon n'a été conservée : ${validationError.message}`);
-          echouees += 1;
-          continue;
-        }
-      }
-
-      if (avance > 0) {
-        // Une avance peut être répartie sur plusieurs lignes du même BL.
-        // On reconstitue les paiements par mode afin de ne perdre aucun montant.
-        const avancesParMode = new Map<string, number>();
-        for (const ligne of groupe.lignesBrutes) {
-          const valeur = ligne["Avance"];
-          if (valeur === undefined || valeur === null || String(valeur).trim() === "") continue;
-          const montant = Number(valeur);
-          if (!Number.isFinite(montant) || montant <= 0) continue;
-          const mode = String(ligne["Mode de paiement"] ?? "").trim() || "Espèces";
-          avancesParMode.set(mode, (avancesParMode.get(mode) ?? 0) + montant);
-        }
-
-        for (const [mode, montant] of Array.from(avancesParMode.entries())) {
-          const { error: paiementError } = await supabase.from("paiements_ventes").insert({
-            vente_id: vente.id,
-            montant,
-            mode_paiement: mode,
-            date_paiement: groupe.dateVente ?? new Date().toISOString().slice(0, 10),
-            created_by: user?.id ?? null,
-          });
-          if (paiementError) {
-            erreursDetail.push(`Vente ${groupe.numero} : paiement initial non enregistré : ${paiementError.message}`);
+        paiements: (() => {
+          const parModeEtDate = new Map<string, { montant: number; mode_paiement: string; date_paiement: string | null; observation: string | null }>();
+          for (const ligne of groupe.lignesBrutes) {
+            const valeur = ligne["Avance"];
+            if (valeur === undefined || valeur === null || String(valeur).trim() === "") continue;
+            const montant = Number(valeur);
+            if (!Number.isFinite(montant) || montant <= 0) continue;
+            const mode = String(ligne["Mode de paiement"] ?? "").trim() || "Espèces";
+            const cle = `${mode}|${groupe.dateVente ?? ""}`;
+            const actuel = parModeEtDate.get(cle);
+            parModeEtDate.set(cle, {
+              montant: (actuel?.montant ?? 0) + montant,
+              mode_paiement: mode,
+              date_paiement: groupe.dateVente,
+              observation: String(ligne["Observation"] ?? "").trim() || null,
+            });
           }
-        }
-      }
-      reussies += 1;
-    }
+          return Array.from(parModeEtDate.values());
+        })(),
+      }));
 
-    setImporting(false);
-    setResultatErreur(echouees > 0);
-    setResultat(
-      `${reussies} vente(s) validée(s)` +
-      (echouees > 0 ? `, ${echouees} échec(s) ou ignorée(s)` : "") +
-      "." +
-      (erreursDetail.length > 0 ? " Détail : " + erreursDetail.join(" | ") : ""),
-    );
-    setGroupes([]);
-    setLignesBrutesCourantes([]);
-    correctionsRef.current = {};
-    setCorrections({});
-    if (fileInputRef.current) fileInputRef.current.value = "";
+      setProgression({ actuel: 0, total: groupes.length });
+      const { data, error } = await supabase.rpc("importer_ventes_excel", {
+        p_groupes: payload,
+        p_utilisateur_id: user.id,
+        p_mode_historique: modeHistorique,
+      });
+
+      if (error) {
+        throw new Error(logSupabaseError({ table: "ventes", operation: "import Excel atomique" }, error, error.message || "L'import des ventes a échoué."));
+      }
+
+      const created = Number((data as { created?: number } | null)?.created ?? groupes.length);
+      setProgression({ actuel: groupes.length, total: groupes.length });
+      setResultatErreur(false);
+      setResultat(`${created} vente(s) importée(s) avec succès. L'import complet a été validé par la base de données.`);
+      setGroupes([]);
+      setLignesBrutesCourantes([]);
+      correctionsRef.current = {};
+      setCorrections({});
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      setResultatErreur(true);
+      setResultat(err instanceof Error ? err.message : "L'import des ventes a échoué. Aucune donnée partielle n'a été conservée.");
+    } finally {
+      setImporting(false);
+    }
   }
 
   function groupeParClient() {
