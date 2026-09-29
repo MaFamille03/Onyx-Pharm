@@ -725,24 +725,21 @@ function ProformaOptionsModal({
   onClose: () => void;
   onConfirm: (options: {
     delaiLivraison: string;
-    modeLivraison: string;
     modalitePaiement: string;
     validiteOffre: string;
-    fraisPort: string;
   }) => void;
 }) {
-  const [delaiLivraison, setDelaiLivraison] = useState("À réception du paiement");
-  const [modeLivraison, setModeLivraison] = useState("");
-  const [modalitePaiement, setModalitePaiement] = useState("");
-  const [validiteOffre, setValiditeOffre] = useState("");
-  const [fraisPort, setFraisPort] = useState("");
+  const [delaiLivraison, setDelaiLivraison] = useState("À convenir");
+  const [modalitePaiement, setModalitePaiement] = useState("À convenir");
+  const [validiteOffre, setValiditeOffre] = useState("15 jours");
 
   return (
-    <Modal title="Détails du proforma" onClose={onClose}>
+    <Modal title="Préparer le proforma" onClose={onClose}>
       <p className="mb-4 text-sm text-onyx-500">
-        Ces informations sont facultatives et n&apos;apparaissent que sur ce
-        document — elles ne modifient rien sur la vente elle-même.
+        Ces trois informations apparaîtront dans les conditions commerciales
+        du proforma. Elles ne modifient pas la vente.
       </p>
+
       <div className="space-y-3">
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">
@@ -751,20 +748,11 @@ function ProformaOptionsModal({
           <input
             value={delaiLivraison}
             onChange={(e) => setDelaiLivraison(e.target.value)}
+            placeholder="Ex. : À convenir"
             className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
           />
         </div>
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-            Mode de livraison
-          </label>
-          <input
-            value={modeLivraison}
-            onChange={(e) => setModeLivraison(e.target.value)}
-            placeholder="Ex : Retrait, DHL..."
-            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-          />
-        </div>
+
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">
             Modalité de paiement
@@ -772,35 +760,24 @@ function ProformaOptionsModal({
           <input
             value={modalitePaiement}
             onChange={(e) => setModalitePaiement(e.target.value)}
-            placeholder="Ex : 30 jours, à la commande..."
+            placeholder="Ex. : À convenir"
             className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
           />
         </div>
+
         <div>
           <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-            Offre valable jusqu&apos;au
+            Validité de l'offre
           </label>
           <input
-            type="date"
             value={validiteOffre}
             onChange={(e) => setValiditeOffre(e.target.value)}
-            className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
-          />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-onyx-700">
-            Frais de port (FCFA)
-          </label>
-          <input
-            type="number"
-            min="0"
-            value={fraisPort}
-            onChange={(e) => setFraisPort(e.target.value)}
-            placeholder="0"
+            placeholder="Ex. : 15 jours"
             className="w-full rounded-lg border border-onyx-200 px-3.5 py-2.5 text-[15px] outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-100"
           />
         </div>
       </div>
+
       <div className="mt-5 flex gap-3">
         <SecondaryButton onClick={onClose} className="flex-1">
           Annuler
@@ -809,17 +786,13 @@ function ProformaOptionsModal({
           onClick={() =>
             onConfirm({
               delaiLivraison,
-              modeLivraison,
               modalitePaiement,
-              validiteOffre: validiteOffre
-                ? new Date(validiteOffre).toLocaleDateString("fr-FR")
-                : "",
-              fraisPort,
+              validiteOffre,
             })
           }
           className="flex-1"
         >
-          Générer le proforma
+          Afficher le proforma
         </PrimaryButton>
       </div>
     </Modal>
@@ -868,11 +841,9 @@ function VenteDetail({
   const [proformaOpen, setProformaOpen] = useState(false);
   const [proformaAfficher, setProformaAfficher] = useState(false);
   const [proformaOptions, setProformaOptions] = useState({
-    delaiLivraison: "",
-    modeLivraison: "",
-    modalitePaiement: "",
-    validiteOffre: "",
-    fraisPort: "",
+    delaiLivraison: "À convenir",
+    modalitePaiement: "À convenir",
+    validiteOffre: "15 jours",
   });
   const [suppressionBrouillonOpen, setSuppressionBrouillonOpen] = useState(false);
   const [reouvertureOpen, setReouvertureOpen] = useState(false);
@@ -1417,10 +1388,8 @@ function VenteDetail({
           reference={vente.reference}
           clientNom={vente.clients?.nom}
           delaiLivraison={proformaOptions.delaiLivraison}
-          modeLivraison={proformaOptions.modeLivraison}
           modalitePaiement={proformaOptions.modalitePaiement}
           validiteOffre={proformaOptions.validiteOffre}
-          fraisPort={Number(proformaOptions.fraisPort) || 0}
           lignes={lignes.map((l) => ({
             designation: l.articles?.designation ?? "",
             quantite: l.quantite,
