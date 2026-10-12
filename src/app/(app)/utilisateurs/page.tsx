@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, KeyRound, UserCog, Users2 } from "lucide-react";
+import { UserCog, Users2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { FormField } from "@/components/auth/FormField";
 import { PrimaryButton } from "@/components/ui/Buttons";
@@ -25,8 +25,6 @@ export default function UtilisateursPage() {
   const [success, setSuccess] = useState(false);
   const [autresProfils, setAutresProfils] = useState<AutreProfil[]>([]);
   const [loadingListe, setLoadingListe] = useState(true);
-  const [entrepriseNom, setEntrepriseNom] = useState<string>("");
-  const [codeInvitation, setCodeInvitation] = useState<string>("");
 
   useEffect(() => {
     async function load() {
@@ -46,19 +44,10 @@ export default function UtilisateursPage() {
       );
       const { data: profile } = await supabase
         .from("profiles")
-        .select("nom_complet, entreprise_id")
+        .select("nom_complet")
         .eq("id", user.id)
         .maybeSingle();
       setNomComplet(profile?.nom_complet ?? "");
-      if (profile?.entreprise_id) {
-        const { data: entreprise } = await supabase
-          .from("entreprises")
-          .select("nom, code_invitation")
-          .eq("id", profile.entreprise_id)
-          .maybeSingle();
-        setEntrepriseNom(entreprise?.nom ?? "");
-        setCodeInvitation(entreprise?.code_invitation ?? "");
-      }
       setLoading(false);
 
       const { data: tous } = await supabase
@@ -96,29 +85,9 @@ export default function UtilisateursPage() {
         Utilisateurs
       </h1>
       <p className="mt-1 text-sm text-onyx-500">
-        Gérez votre profil et consultez les utilisateurs rattachés à votre entreprise.
+        Chaque compte identifie précisément son titulaire pour assurer la
+        traçabilité des opérations.
       </p>
-
-      <div className="mt-6 max-w-lg rounded-xl border border-onyx-100 bg-white p-5">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-700">
-            <Building2 size={20} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-onyx-400">Votre entreprise</p>
-            <p className="mt-1 break-words text-base font-semibold text-onyx-900">{entrepriseNom || "Chargement…"}</p>
-            <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-onyx-500">
-              <KeyRound size={14} /> Code d&apos;invitation
-            </p>
-            <p className="mt-1 select-all rounded-lg border border-dashed border-onyx-200 bg-onyx-50 px-3 py-2 font-mono text-sm tracking-widest text-onyx-800">
-              {codeInvitation || "—"}
-            </p>
-            <p className="mt-2 text-xs leading-5 text-onyx-500">
-              Partagez ce code uniquement avec les personnes autorisées à rejoindre cette entreprise. Les comptes utilisant ce code accéderont aux données de votre espace.
-            </p>
-          </div>
-        </div>
-      </div>
 
       <div className="mt-6 max-w-lg rounded-xl border border-onyx-100 bg-white p-5">
         <div className="flex items-center gap-3">
@@ -160,7 +129,9 @@ export default function UtilisateursPage() {
           Autres utilisateurs de l&apos;application
         </h2>
         <p className="mt-1 text-xs text-onyx-400">
-          Cette liste affiche uniquement les comptes rattachés à votre entreprise. Chaque utilisateur ne peut modifier que son propre nom.
+          Tous les comptes connectés partagent les mêmes données. Cette
+          liste est consultative — chacun ne peut modifier que son propre
+          nom, ci-dessus.
         </p>
 
         <div className="mt-3 space-y-2">

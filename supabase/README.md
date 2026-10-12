@@ -4,37 +4,25 @@ Ce dossier contient les migrations SQL qui créent l'intégralité de la base
 de données (tables, relations, sécurité). Elles sont numérotées et doivent
 être exécutées **dans l'ordre**.
 
-
-## Migration 0045 — Mode multi-entreprises (même base Supabase)
-
-Si votre projet contient déjà les migrations jusqu'à `0044_import_ventes_excel_atomique.sql`, exécutez **une seule fois** `migrations/0045_multi_entreprises.sql` dans Supabase → SQL Editor. Ne rejouez pas les migrations précédentes sur une base déjà utilisée.
-
-Cette migration rattache les données actuelles à l'entreprise par défaut **ONYX PHARM SARL**, ajoute l'isolation par entreprise sur les tables métier, et modifie les politiques RLS. Les données existantes ne sont pas supprimées.
-
-Après déploiement :
-
-1. Connectez-vous avec votre compte actuel : ses données restent dans l'espace ONYX PHARM.
-2. Ouvrez **Utilisateurs** et relevez le code d'invitation affiché dans la carte de votre entreprise.
-3. Pour créer un espace indépendant, ouvrez **Créer un compte** puis choisissez **Nouvelle entreprise** et saisissez son nom.
-4. Pour rattacher un collègue à une entreprise existante, choisissez **Rejoindre une entreprise** et utilisez le code d'invitation de cette entreprise.
-5. Vérifiez qu'un compte de la nouvelle entreprise ne voit pas les articles, ventes, caisses et utilisateurs d'ONYX PHARM.
-
-Chaque entreprise utilise les mêmes tables et les mêmes fonctionnalités, mais les données et la numérotation des documents sont séparées par entreprise. Le code d'invitation doit être partagé uniquement avec les personnes autorisées à rejoindre cet espace.
-
 ## Comment exécuter les migrations
 
-**Base déjà en service :** si votre projet Supabase a déjà toutes les migrations précédentes jusqu'à `0044_import_ventes_excel_atomique.sql`, appliquez uniquement `migrations/0045_multi_entreprises.sql`, une seule fois. Ne relancez pas les anciens scripts sur les données réelles.
+1. Allez sur [supabase.com](https://supabase.com) → votre projet
+   `onyx-pharm`
+2. Dans le menu de gauche, cliquez sur **SQL Editor**
+3. Cliquez **New query**
+4. Ouvrez le fichier `migrations/0001_reference_data.sql` (avec le Bloc-
+   notes, VS Code, ou n'importe quel éditeur de texte), copiez tout son
+   contenu
+5. Collez-le dans l'éditeur SQL de Supabase
+6. Cliquez **Run** (ou `Ctrl+Entrée` / `Cmd+Entrée`)
+7. Vous devez voir **Success. No rows returned**
+8. Répétez les étapes 3 à 7 pour :
+   - `0002_articles_stock.sql`
+   - `0003_ventes_achats_caisse.sql`
+   - `0004_historique_rls.sql`
 
-**Nouvelle installation :** les fichiers présents dans `migrations/` doivent être exécutés dans l'ordre numérique, du plus petit au plus grand (y compris les migrations intermédiaires). Chaque fichier dépend des structures créées précédemment.
-
-Pour exécuter un fichier :
-
-1. Allez sur [supabase.com](https://supabase.com) → votre projet.
-2. Ouvrez **SQL Editor** puis cliquez sur **New query**.
-3. Ouvrez le fichier SQL souhaité, copiez tout son contenu et collez-le dans l'éditeur.
-4. Cliquez sur **Run** et vérifiez qu'aucune erreur n'apparaît.
-
-La migration `0045_multi_entreprises.sql` modifie la sécurité RLS et doit donc être appliquée seulement après les migrations de création de toutes les tables et fonctions.
+**Important : respectez l'ordre.** Chaque fichier dépend des tables créées
+par le précédent.
 
 ## Vérifier que tout s'est bien passé
 
@@ -90,4 +78,9 @@ entièrement sur les tables et vues déjà créées.
 
 ## Sécurité (Row Level Security)
 
-Les migrations initiales autorisaient tous les utilisateurs connectés à partager les mêmes données. Après l'application de `0045_multi_entreprises.sql`, les politiques RLS isolent les données selon `entreprise_id`. Un membre ne consulte que l'espace de son entreprise ; l'inscription doit créer une entreprise ou utiliser un code d'invitation valide.
+Chaque table est protégée : **seuls les utilisateurs connectés** à
+l'application peuvent lire ou modifier les données (personne d'anonyme ne
+peut y accéder directement). Conformément au cahier des charges, tous les
+comptes connectés partagent les mêmes données — il n'y a pas de
+restriction entre utilisateurs à ce stade, seule la traçabilité (qui a fait
+quoi) est assurée via la colonne `created_by` et la table `historique`.
