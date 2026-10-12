@@ -154,7 +154,7 @@ export default function InscriptionPage() {
                 required
               />
               <p className="text-xs leading-5 text-onyx-500">
-                Demandez ce code au responsable de l'entreprise. Il permet de rattacher votre compte au bon espace sans mélanger les données.
+                Demandez ce code au responsable de l&apos;entreprise. Il permet de rattacher votre compte au bon espace sans mélanger les données.
               </p>
             </>
           )}
