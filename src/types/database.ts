@@ -8,6 +8,7 @@ export interface Profile {
   id: string;
   email: string | null;
   nom_complet: string | null;
+  entreprise_id: string;
   created_at: string;
 }
 

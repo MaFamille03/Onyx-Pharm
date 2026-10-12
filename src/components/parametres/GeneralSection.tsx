@@ -60,7 +60,7 @@ export function GeneralSection() {
       .from("parametres_generaux")
       .upsert(
         { cle: "date_conception_site", valeur: dateConception },
-        { onConflict: "cle" }
+        { onConflict: "entreprise_id,cle" }
       );
     setSaving(false);
     if (error) {

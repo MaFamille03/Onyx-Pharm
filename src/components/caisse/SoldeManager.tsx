@@ -223,7 +223,7 @@ export function SoldeManager() {
       .from("parametres_generaux")
       .upsert(
         { cle: "solde_caisse_initial", valeur: String(val) },
-        { onConflict: "cle" }
+        { onConflict: "entreprise_id,cle" }
       );
     setSaving(false);
     if (error) {

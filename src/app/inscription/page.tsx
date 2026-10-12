@@ -10,6 +10,9 @@ import { SubmitButton } from "@/components/auth/SubmitButton";
 
 export default function InscriptionPage() {
   const [email, setEmail] = useState("");
+  const [entrepriseMode, setEntrepriseMode] = useState<"creer" | "rejoindre">("creer");
+  const [entrepriseNom, setEntrepriseNom] = useState("");
+  const [codeInvitation, setCodeInvitation] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,6 +23,14 @@ export default function InscriptionPage() {
     e.preventDefault();
     setError(null);
 
+    if (entrepriseMode === "creer" && entrepriseNom.trim().length < 2) {
+      setError("Saisissez le nom de votre entreprise (2 caractères minimum).");
+      return;
+    }
+    if (entrepriseMode === "rejoindre" && codeInvitation.trim().length < 6) {
+      setError("Saisissez le code d'invitation fourni par votre entreprise.");
+      return;
+    }
     if (password.length < 8) {
       setError("Le mot de passe doit contenir au moins 8 caractères.");
       return;
@@ -36,16 +47,26 @@ export default function InscriptionPage() {
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
+        data: {
+          entreprise_mode: entrepriseMode,
+          entreprise_nom: entrepriseMode === "creer" ? entrepriseNom.trim() : null,
+          code_invitation: entrepriseMode === "rejoindre" ? codeInvitation.trim().toUpperCase() : null,
+        },
       },
     });
 
     if (error) {
       // eslint-disable-next-line no-console
       console.error("[ONYX PHARM] Erreur auth (signUp)", error);
+      const message = error.message || "";
       setError(
-        error.message === "User already registered"
+        message === "User already registered"
           ? "Un compte existe déjà avec cette adresse e-mail."
-          : "Une erreur est survenue. Réessayez."
+          : /Code d.invitation invalide/i.test(message)
+            ? "Le code d'invitation est invalide. Vérifiez-le auprès du responsable de l'entreprise."
+            : /nom de l.entreprise/i.test(message)
+              ? "Saisissez un nom d'entreprise valide."
+              : "Une erreur est survenue lors de la création du compte. Vérifiez les informations et réessayez."
       );
       setLoading(false);
       return;
@@ -63,7 +84,7 @@ export default function InscriptionPage() {
       >
         <FormAlert
           type="success"
-          message={`Un e-mail de confirmation a été envoyé à ${email}. Cliquez sur le lien qu'il contient pour activer votre compte.`}
+          message={`Un e-mail de confirmation a été envoyé à ${email}. Cliquez sur le lien qu'il contient pour activer votre compte.${entrepriseMode === "creer" ? " Votre espace d'entreprise sera initialisé automatiquement." : " Vous serez rattaché à l'entreprise correspondant au code d'invitation."}`}
         />
         <Link
           href="/connexion"
@@ -78,7 +99,7 @@ export default function InscriptionPage() {
   return (
     <AuthCard
       title="Créer un compte"
-      subtitle="Rejoignez l'espace de gestion ONYX PHARM."
+      subtitle="Créez un espace d'entreprise ou rejoignez celui de votre équipe."
       footer={
         <>
           Déjà un compte ?{" "}
@@ -90,6 +111,54 @@ export default function InscriptionPage() {
     >
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && <FormAlert message={error} />}
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-onyx-700">Espace de travail</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setEntrepriseMode("creer")}
+              className={`rounded-lg border px-3 py-2.5 text-sm font-medium transition ${entrepriseMode === "creer" ? "border-accent-500 bg-accent-50 text-accent-700 ring-1 ring-accent-200" : "border-onyx-200 bg-white text-onyx-600 hover:bg-onyx-50"}`}
+              aria-pressed={entrepriseMode === "creer"}
+            >
+              Nouvelle entreprise
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntrepriseMode("rejoindre")}
+              className={`rounded-lg border px-3 py-2.5 text-sm font-medium transition ${entrepriseMode === "rejoindre" ? "border-accent-500 bg-accent-50 text-accent-700 ring-1 ring-accent-200" : "border-onyx-200 bg-white text-onyx-600 hover:bg-onyx-50"}`}
+              aria-pressed={entrepriseMode === "rejoindre"}
+            >
+              Rejoindre une entreprise
+            </button>
+          </div>
+          {entrepriseMode === "creer" ? (
+            <FormField
+              id="entrepriseNom"
+              label="Nom de l'entreprise"
+              value={entrepriseNom}
+              onChange={(e) => setEntrepriseNom(e.target.value)}
+              placeholder="Ex. : ONYX PHARM SARL"
+              autoComplete="organization"
+              required
+            />
+          ) : (
+            <>
+              <FormField
+                id="codeInvitation"
+                label="Code d'invitation"
+                value={codeInvitation}
+                onChange={(e) => setCodeInvitation(e.target.value.toUpperCase())}
+                placeholder="Ex. : A1B2C3D4E5F6A7B8"
+                autoComplete="off"
+                required
+              />
+              <p className="text-xs leading-5 text-onyx-500">
+                Demandez ce code au responsable de l'entreprise. Il permet de rattacher votre compte au bon espace sans mélanger les données.
+              </p>
+            </>
+          )}
+        </div>
 
         <FormField
           id="email"
